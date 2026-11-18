@@ -13,7 +13,6 @@ Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "WinCore.nsh"
-!include "WinUser.nsh"
 !include "x64.nsh"
 
 Name "EnvSwitch ${VERSION}"
