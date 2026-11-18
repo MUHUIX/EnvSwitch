@@ -13,9 +13,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check release notes
+        shell: pwsh
+        run: |
+          $notes = "releases/${{ github.ref_name }}.md"
+          if (-not (Test-Path $notes)) {
+            Write-Error "缺少本次版本更新说明：$notes 。每个 v* tag 都必须带一份只描述本次变更的说明文件。"
+            exit 1
+          }
+          Write-Host "本次更新说明：$notes"
+
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.26.5"
           cache: true
 
       - uses: actions/setup-node@v4
@@ -50,6 +60,7 @@ jobs:
       - name: Release + update manifest
         uses: softprops/action-gh-release@v2
         with:
+          body_path: releases/${{ github.ref_name }}.md
           files: |
             out/EnvSwitch-win-x64.zip
             out/SHA256SUMS.txt
@@ -61,10 +72,11 @@ jobs:
           $zip = "out/EnvSwitch-win-x64.zip"
           $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
           $tag = "${{ github.ref_name }}"
+          $notes = Get-Content -Raw "releases/$tag.md"
           $manifest = @{
             version = $tag
             date    = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-            notes_zh = "${{ github.event.release.body }}"
+            notes_zh = $notes
             assets  = @{
               "windows/amd64" = @{
                 url    = "https://github.com/HUIdada1/EnvSwitch/releases/download/$tag/EnvSwitch-win-x64.zip"
@@ -76,7 +88,7 @@ jobs:
           git config user.name "envswitch-ci"
           git config user.email "ci@users.noreply.github.com"
           git checkout --orphan updates
-          Remove-Item -Recurse -Force * -ErrorAction SilentlyContinue
+          git rm -rf . 2>$null | Out-Null
           [IO.File]::WriteAllText("latest.json", $manifest)
           git add latest.json
           git commit -m "release $tag"
