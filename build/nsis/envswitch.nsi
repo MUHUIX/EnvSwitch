@@ -6,6 +6,9 @@
   !define VERSION "v0.0.0-dev"
 !endif
 
+; 以脚本自身位置为基准，避免受 makensis 工作目录影响
+!define ROOT "${__FILEDIR__}\..\.."
+
 Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
@@ -14,14 +17,14 @@ Unicode true
 !include "x64.nsh"
 
 Name "EnvSwitch ${VERSION}"
-OutFile "..\..\bin\nsis\EnvSwitch-Setup-${VERSION}.exe"
+OutFile "${ROOT}\build\bin\nsis\EnvSwitch-Setup-${VERSION}.exe"
 InstallDir "$LOCALAPPDATA\Programs\EnvSwitch"
 RequestExecutionLevel user   ; per-user，全程不提权
 SetCompressor /SOLID lzma
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "..\windows\icon.ico"
-!define MUI_UNICON "..\windows\icon.ico"
+!define MUI_ICON "${ROOT}\build\windows\icon.ico"
+!define MUI_UNICON "${ROOT}\build\windows\icon.ico"
 
 ; —— 安装页 ——
 !insertmacro MUI_PAGE_WELCOME
@@ -45,9 +48,9 @@ FunctionEnd
 
 Section "EnvSwitch"
   SetOutPath "$INSTDIR"
-  File "..\..\bin\EnvSwitch.exe"
-  File "..\..\bin\envs.exe"
-  File "..\..\..\logo.png"
+  File "${ROOT}\build\bin\EnvSwitch.exe"
+  File "${ROOT}\build\bin\envs.exe"
+  File "${ROOT}\logo.png"
 
   ; 快捷方式（开始菜单 + 可选桌面）
   CreateDirectory "$SMPROGRAMS\EnvSwitch"

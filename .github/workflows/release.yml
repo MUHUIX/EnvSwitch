@@ -55,7 +55,10 @@ jobs:
             Set-Content out\SHA256SUMS.txt -Encoding ascii
 
       - name: Installer (NSIS)
-        run: makensis /DVERSION=${{ github.ref_name }} build\nsis\envswitch.nsi
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build\bin\nsis | Out-Null
+          makensis /DVERSION=${{ github.ref_name }} build\nsis\envswitch.nsi
 
       - name: Release + update manifest
         uses: softprops/action-gh-release@v2
