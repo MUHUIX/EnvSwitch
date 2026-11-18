@@ -69,7 +69,7 @@ envs use node 22            # 切换（毫秒级重指 junction），顺带首�
 envs doctor                 # 体检：PATH 顺序、链接健康、共存冲突、WebView2
 ```
 
-完整操作手册（界面导览、每个设置项的含义、数据搬家、镜像与代理、故障排查、已知限制）见 **[docs/使用说明书.md](docs/使用说明书.md)**。
+完整操作手册（界面导览、每个设置项的含义、数据搬家、镜像与代理、故障排查、已知限制）见 **[docs/使用说明书.md](docs/使用说明书.md)**。各版本改了什么见 [releases/](releases/) 目录与 [Releases 页面](https://github.com/HUIdada1/EnvSwitch/releases)。
 
 ## 命令行
 
