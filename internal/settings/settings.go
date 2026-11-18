@@ -13,15 +13,16 @@ import (
 )
 
 type Settings struct {
-	Version           int               `json:"version"`
-	Autostart         bool              `json:"autostart"`
-	CloseToTray       bool              `json:"closeToTray"`
-	CheckUpdateOnStart bool             `json:"checkUpdateOnStart"`
-	StorePath         string            `json:"storePath,omitempty"` // 空则用默认 home\store
-	Mirrors           map[string]string `json:"mirrors"`
-	Proxy             string            `json:"proxy"` // GitHub 代理前缀，如 https://ghproxy.net/
-	IndexCacheMinutes int               `json:"indexCacheMinutes"`
-	EnabledTools      []string          `json:"enabledTools"`
+	Version            int               `json:"version"`
+	Autostart          bool              `json:"autostart"`
+	CloseToTray        bool              `json:"closeToTray"`
+	AutoCheckUpdate    bool              `json:"autoCheckUpdate"`
+	CheckUpdateOnStart bool              `json:"checkUpdateOnStart,omitempty"`
+	StorePath          string            `json:"storePath,omitempty"` // 空则用默认 home\store
+	Mirrors            map[string]string `json:"mirrors"`
+	Proxy              string            `json:"proxy"` // GitHub 代理前缀，如 https://ghproxy.net/
+	IndexCacheMinutes  int               `json:"indexCacheMinutes"`
+	EnabledTools       []string          `json:"enabledTools"`
 
 	path string // 磁盘位置，Save 用
 }
@@ -59,6 +60,7 @@ func Load() (*Settings, error) {
 		Version:            1,
 		Autostart:          false,
 		CloseToTray:        true,
+		AutoCheckUpdate:    true,
 		CheckUpdateOnStart: true,
 		Mirrors:            map[string]string{},
 		IndexCacheMinutes:  10,
@@ -79,6 +81,11 @@ func Load() (*Settings, error) {
 	if err := json.Unmarshal(data, s); err != nil {
 		return nil, err
 	}
+	// 兼容迁移：如果设置了 checkUpdateOnStart 但没有显式 autoCheckUpdate
+	if !s.AutoCheckUpdate && s.CheckUpdateOnStart {
+		s.AutoCheckUpdate = s.CheckUpdateOnStart
+	}
+	s.CheckUpdateOnStart = s.AutoCheckUpdate
 	for k, v := range DefaultMirrors {
 		if _, ok := s.Mirrors[k]; !ok {
 			s.Mirrors[k] = v

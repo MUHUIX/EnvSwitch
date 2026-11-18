@@ -4,14 +4,18 @@
 package sys
 
 import (
+	"os"
 	"runtime"
 	"syscall"
 	"unsafe"
 )
 
 var (
+	kernel32            = syscall.NewLazyDLL("kernel32.dll")
 	user32              = syscall.NewLazyDLL("user32.dll")
 	shell32             = syscall.NewLazyDLL("shell32.dll")
+	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
+	procExtractIconExW  = shell32.NewProc("ExtractIconExW")
 	procRegisterClassW  = user32.NewProc("RegisterClassExW")
 	procCreateWndW      = user32.NewProc("CreateWindowExW")
 	procDefWndProc      = user32.NewProc("DefWindowProcW")
@@ -133,8 +137,31 @@ func (t *Tray) run(tip string) {
 		0, 0, 0, 0, 0, 0, 0, 0)
 	trayByHwnd[hwnd] = t
 
-	// 图标：exe 资源 id=3（wails 构建约定），失败退系统应用图标
-	icon, _, _ := procLoadImageW.Call(0, 3, imageIcon, 16, 16, lrShared)
+	// 图标：优先从当前 exe 提取第 0 个图标（即包含的 Logo 托盘小图标）
+	var icon uintptr
+	if exePath, err := os.Executable(); err == nil {
+		exePathW, _ := syscall.UTF16PtrFromString(exePath)
+		var hSmall uintptr
+		r, _, _ := procExtractIconExW.Call(
+			uintptr(unsafe.Pointer(exePathW)),
+			0, // 索引 0（主图标）
+			0, // 不需要大图标
+			uintptr(unsafe.Pointer(&hSmall)),
+			1,
+		)
+		if r > 0 && hSmall != 0 {
+			icon = hSmall
+		}
+	}
+	if icon == 0 {
+		hInst, _, _ := procGetModuleHandleW.Call(0)
+		for _, resId := range []uintptr{3, 1, 7} {
+			icon, _, _ = procLoadImageW.Call(hInst, resId, imageIcon, 16, 16, lrShared)
+			if icon != 0 {
+				break
+			}
+		}
+	}
 	if icon == 0 {
 		icon, _, _ = procLoadImageW.Call(0, idiAppIcon, imageIcon, 0, 0, lrShared)
 	}

@@ -14,7 +14,6 @@ type Rust struct{}
 
 func (Rust) ID() string           { return "rust" }
 func (Rust) Title() string        { return "Rust" }
-func (Rust) Group() string        { return "runtime" }
 func (Rust) BinSub() string       { return "bin" }
 func (Rust) Smoke() (string, []string) { return "rustc.exe", []string{"--version"} }
 func (Rust) ProbeFiles() []string { return []string{"bin/rustc.exe", "bin/cargo.exe"} }
@@ -56,7 +55,6 @@ type Uv struct{}
 
 func (Uv) ID() string           { return "uv" }
 func (Uv) Title() string        { return "uv" }
-func (Uv) Group() string        { return "packages" }
 func (Uv) BinSub() string       { return "" }
 func (Uv) Smoke() (string, []string) { return "uv.exe", []string{"--version"} }
 func (Uv) ProbeFiles() []string { return []string{"uv.exe"} }
@@ -100,7 +98,6 @@ type Php struct{}
 
 func (Php) ID() string           { return "php" }
 func (Php) Title() string        { return "PHP" }
-func (Php) Group() string        { return "runtime" }
 func (Php) BinSub() string       { return "" }
 func (Php) Smoke() (string, []string) { return "php.exe", []string{"-v"} }
 func (Php) ProbeFiles() []string { return []string{"php.exe"} }

@@ -48,7 +48,7 @@ jobs:
           go build -trimpath -ldflags $ld -o build\bin\envs.exe .\cmd\envs
           go build -tags production -trimpath -ldflags "$ld -H=windowsgui" -o build\bin\EnvSwitch.exe .
           New-Item -ItemType Directory -Force -Path out | Out-Null
-          Compress-Archive -Path build\bin\envs.exe, build\bin\EnvSwitch.exe `
+          Compress-Archive -Path build\bin\envs.exe, build\bin\EnvSwitch.exe, LICENSE, THIRD-PARTY-NOTICES.md `
             -DestinationPath out\EnvSwitch-win-x64.zip
           Get-FileHash out\EnvSwitch-win-x64.zip -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash.ToLower())  EnvSwitch-win-x64.zip" } |

@@ -119,6 +119,39 @@ export const BRAND_LOGOS = {
   terraform: `<g>
     <rect x="2" y="2" width="20" height="20" rx="4" fill="#5C4EE5"/>
     <path fill="#FFFFFF" d="M7 6v4l3.5 2V8L7 6zm4 2.3v4l3.5 2V10l-3.5-1.7zm0 4.6v4l3.5 2v-4l-3.5-2zM15 10.3v4l3.5 2v-4L15 10.3z"/>
+  </g>`,
+
+  // Pip 官方包管理器经典蓝黄标识
+  pip: `<g>
+    <rect x="2" y="2" width="20" height="20" rx="4" fill="#3775A9"/>
+    <path fill="#FFD343" d="M11 6.5h3.5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5H11v3.5H8.5V6.5H11zm0 3.5h3.5c.6 0 1-.4 1-1s-.4-1-1-1H11v2z"/>
+    <circle cx="6.5" cy="16.5" r="1.5" fill="#FFD343"/>
+    <circle cx="17.5" cy="16.5" r="1.5" fill="#3775A9"/>
+  </g>`,
+
+  // nvm-windows 官方 Node 版本管理徽标
+  nvm: `<g>
+    <rect x="2" y="2" width="20" height="20" rx="4" fill="#1E293B"/>
+    <path fill="#41B883" d="M6 16.5V7.5l4 5 4-5v9h-2.2v-4.8L9.8 14l-2-2.3v4.8H6zm11-9h2.2v9H17v-9z"/>
+    <circle cx="18.1" cy="6" r="1.2" fill="#41B883"/>
+  </g>`,
+
+  // Git 官方双分支高辨识度徽标
+  git: `<g>
+    <rect x="2" y="2" width="20" height="20" rx="4" fill="#F05032"/>
+    <path fill="#FFFFFF" d="M17.5 10.7l-4.2-4.2a1.8 1.8 0 0 0-2.6 0l-4.2 4.2a1.8 1.8 0 0 0 0 2.6l4.2 4.2c.7.7 1.9.7 2.6 0l4.2-4.2c.7-.7.7-1.9 0-2.6zm-5.5 4.8a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4zm0-5a1.2 1.2 0 0 1-1.2-1.2c0-.7.5-1.2 1.2-1.2s1.2.5 1.2 1.2c0 .7-.5 1.2-1.2 1.2zm-2.8 2.8a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4z"/>
+  </g>`,
+
+  // Docker 官方经典深蓝鲸鱼与集装箱
+  docker: `<g>
+    <rect x="2" y="2" width="20" height="20" rx="4" fill="#2496ED"/>
+    <path fill="#FFFFFF" d="M6.5 11h2v2h-2zm2.5 0h2v2H9zm2.5 0h2v2h-2zm2.5 0h2v2h-2zm-5-2.5h2v2H9zm2.5 0h2v2h-2zm2.5 0h2v2h-2zm-2.5-2.5h2v2h-2zm7.5 7.5c-.3 0-.6.1-.8.2-1.2-.8-2.6-1.2-4.2-1.2H4.5c-.3 1.5.2 3.1 1.2 4.2 1.3 1.4 3.2 2.1 5.3 2.1 4.5 0 8-3.1 8-5.3h-1.5z"/>
+  </g>`,
+
+  // Redis 官方经典红色方块
+  redis: `<g>
+    <rect x="2" y="2" width="20" height="20" rx="4" fill="#DC382D"/>
+    <path fill="#FFFFFF" d="M12 5.5l7 3.5v6l-7 3.5-7-3.5v-6l7-3.5zm0 2.2L7.5 10 12 12.2l4.5-2.2L12 7.7zm-5.5 4v3.6l4.5 2.2v-3.6l-4.5-2.2zm11 0l-4.5 2.2v3.6l4.5-2.2v-3.6z"/>
   </g>`
 }
 
@@ -137,5 +170,13 @@ export const UI_ICONS = {
   alert: '<path d="M12 3 2.5 20h19zM12 9v5m0 2.5v.5"/>',
   chev: '<path d="m8 10 4 4 4-4"/>',
   chevr: '<path d="m10 8 4 4-4 4"/>',
-  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  proxy: '<circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8M11.5 3a17 17 0 0 0 0 18M12.5 3a17 17 0 0 1 0 18"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
+  caret: '<path d="m9 18 6-6-6-6"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  plus: '<path d="M12 5v14m-7-7h14"/>',
+  play: '<polygon points="7 4 19 12 7 20 7 4"/>',
+  edit: '<path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>',
+  sync: '<path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>'
 }

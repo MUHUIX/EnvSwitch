@@ -8,7 +8,118 @@ function call (method, ...args) {
   return b[method](...args)
 }
 
+let demoNetProxy = {
+  version: 1,
+  mode: 'off',
+  fixedId: '',
+  settings: { testUrl: 'https://api.ipify.org?format=json', timeoutMs: 15000 },
+  items: [
+    {
+      id: 'demo_1',
+      name: 'Clash 混合代理 (Verge)',
+      protocol: 'http',
+      host: '127.0.0.1',
+      port: 7897,
+      username: '',
+      hasPassword: false,
+      enabled: true,
+      source: 'clash',
+      clashUid: '__mixed__',
+      lastTest: { success: true, status: 200, ip: '104.28.19.42', durationMs: 186, error: '', at: Date.now() - 3600000 },
+      createdAt: Date.now() - 86400000,
+      updatedAt: Date.now() - 86400000
+    },
+    {
+      id: 'demo_2',
+      name: '香港高速出口 01',
+      protocol: 'socks5',
+      host: '127.0.0.1',
+      port: 10808,
+      username: '',
+      hasPassword: false,
+      enabled: true,
+      source: 'manual',
+      lastTest: null,
+      createdAt: Date.now() - 43200000,
+      updatedAt: Date.now() - 43200000
+    }
+  ]
+}
+
 function demo (method, args) {
+  if (method === 'NetProxyList') return JSON.parse(JSON.stringify(demoNetProxy))
+  if (method === 'NetProxySave') {
+    const draft = args[0] || {}
+    let it = demoNetProxy.items.find(i => i.id === draft.id)
+    if (it) {
+      Object.assign(it, draft, { updatedAt: Date.now() })
+    } else {
+      it = {
+        id: 'np_' + Math.random().toString(16).slice(2, 10),
+        name: draft.name,
+        protocol: draft.protocol || 'http',
+        host: draft.host,
+        port: Number(draft.port),
+        username: draft.username || '',
+        hasPassword: !!draft.password,
+        enabled: draft.enabled !== false,
+        source: 'manual',
+        lastTest: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      }
+      demoNetProxy.items.push(it)
+    }
+    return JSON.parse(JSON.stringify(it))
+  }
+  if (method === 'NetProxyRemove') {
+    const id = args[0]
+    demoNetProxy.items = demoNetProxy.items.filter(i => i.id !== id)
+    if (demoNetProxy.fixedId === id) {
+      demoNetProxy.fixedId = ''
+      if (demoNetProxy.mode === 'fixed') demoNetProxy.mode = 'off'
+    }
+    return null
+  }
+  if (method === 'NetProxyToggle') {
+    const [id, enabled] = args
+    const it = demoNetProxy.items.find(i => i.id === id)
+    if (it) it.enabled = !!enabled
+    return it ? JSON.parse(JSON.stringify(it)) : null
+  }
+  if (method === 'NetProxySaveSettings') {
+    const req = args[0] || {}
+    if (req.mode) demoNetProxy.mode = req.mode
+    if (req.fixedId !== undefined) demoNetProxy.fixedId = req.fixedId
+    if (req.testUrl) demoNetProxy.settings.testUrl = req.testUrl
+    if (req.timeoutMs) demoNetProxy.settings.timeoutMs = req.timeoutMs
+    return JSON.parse(JSON.stringify(demoNetProxy))
+  }
+  if (method === 'NetProxyTest') {
+    const target = args[0] || {}
+    const res = {
+      success: true,
+      status: 200,
+      ip: '104.28.19.42',
+      durationMs: 142 + Math.floor(Math.random() * 60),
+      error: '',
+      at: Date.now()
+    }
+    if (target.id) {
+      const it = demoNetProxy.items.find(i => i.id === target.id)
+      if (it) it.lastTest = res
+    }
+    return res
+  }
+  if (method === 'NetProxyClashSync') {
+    return {
+      ok: true,
+      message: '成功从 Clash Verge 同步混合端口 (7897)',
+      added: 1,
+      updated: 0,
+      items: demoNetProxy.items
+    }
+  }
   if (method === 'Overview') {
     const mk = (id, title, kind, group, lamp, cur) => ({
       id, title, kind, group, lamp, remoteState: 'pending',
@@ -54,7 +165,14 @@ export const api = {
   openStoreDir: () => call('OpenStoreDir'),
   pendingUpdate: () => call('PendingUpdate'),
   checkUpdate: () => call('CheckUpdateNow'),
-  applyUpdate: () => call('ApplyUpdate')
+  applyUpdate: () => call('ApplyUpdate'),
+  netproxyList: () => call('NetProxyList'),
+  netproxySave: (draft) => call('NetProxySave', draft),
+  netproxyRemove: (id) => call('NetProxyRemove', id),
+  netproxyToggle: (id, enabled) => call('NetProxyToggle', id, !!enabled),
+  netproxySaveSettings: (req) => call('NetProxySaveSettings', req),
+  netproxyTest: (draft) => call('NetProxyTest', draft),
+  netproxyClashSync: () => call('NetProxyClashSync')
 }
 
 // wails 事件桥（dev 模式无 window.runtime 时空实现）

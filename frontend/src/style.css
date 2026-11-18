@@ -37,6 +37,11 @@
   --r-panel: 10px;
   --r-card: 8px;
   --r-ctl: 6px;
+
+  --shadow-card: 0 3px 10px rgba(0, 0, 0, 0.16);
+  --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.28), 0 0 1px var(--accent-line);
+  --shadow-btn: 0 1px 3px rgba(0, 0, 0, 0.12);
+  --shadow-glow: 0 0 14px rgba(63, 191, 168, 0.2);
 }
 
 /* ===== 明亮模式 ===== */
@@ -67,6 +72,11 @@
 
   --lamp-off: #CBD5E0;
   --lamp-idle: #A0AEC0;
+
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.05);
+  --shadow-card-hover: 0 6px 18px rgba(0, 0, 0, 0.1), 0 0 1px var(--accent-line);
+  --shadow-btn: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-glow: 0 0 10px rgba(14, 159, 133, 0.15);
 }
 
 * {
@@ -192,16 +202,18 @@ input {
   color: var(--ink-1);
   border: 1px solid var(--hairline);
   background: var(--surface);
-  transition: all 0.15s var(--ease);
+  box-shadow: var(--shadow-btn);
+  transition: all 0.16s var(--ease);
 }
 
 .btn:hover {
   background: var(--surface-raised);
   border-color: var(--hairline-strong);
+  transform: translateY(-1px);
 }
 
 .btn:active {
-  transform: scale(0.97);
+  transform: scale(0.97) translateY(0);
 }
 
 .btn.primary {
@@ -209,22 +221,25 @@ input {
   border-color: var(--accent);
   color: #FFFFFF;
   font-weight: 600;
-  box-shadow: 0 2px 8px var(--accent-dim);
+  box-shadow: 0 2px 8px var(--accent-dim), var(--shadow-glow);
 }
 
 .btn.primary:hover {
   filter: brightness(1.08);
+  box-shadow: 0 4px 12px var(--accent-dim), 0 0 18px var(--accent-line);
 }
 
 .btn.ghost {
   background: transparent;
   border-color: var(--hairline);
   color: var(--ink-2);
+  box-shadow: none;
 }
 
 .btn.ghost:hover {
   background: var(--surface-soft);
   color: var(--ink-1);
+  border-color: var(--hairline-strong);
 }
 
 .btn.sm {
@@ -238,6 +253,7 @@ input {
   opacity: 0.45;
   cursor: not-allowed;
   transform: none !important;
+  box-shadow: none !important;
 }
 
 /* 状态指示灯 */
@@ -252,7 +268,7 @@ input {
 
 .lamp.ok {
   background: var(--ok);
-  box-shadow: 0 0 7px var(--ok);
+  box-shadow: 0 0 8px var(--ok), 0 0 12px rgba(63, 191, 168, 0.4);
 }
 
 .lamp.idle {
@@ -261,12 +277,12 @@ input {
 
 .lamp.up {
   background: var(--warn);
-  box-shadow: 0 0 7px var(--warn);
+  box-shadow: 0 0 8px var(--warn), 0 0 12px rgba(229, 180, 84, 0.4);
 }
 
 .lamp.err {
   background: var(--danger);
-  box-shadow: 0 0 7px var(--danger);
+  box-shadow: 0 0 8px var(--danger), 0 0 12px rgba(242, 109, 109, 0.4);
 }
 
 /* 仪表卡格网 */
@@ -285,13 +301,14 @@ input {
   flex-direction: column;
   gap: 10px;
   position: relative;
+  box-shadow: var(--shadow-card);
   transition: border-color 0.2s var(--ease), transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
 
 .gauge-card:hover {
   border-color: var(--hairline-strong);
   transform: translateY(-2px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .gauge-card.dim {

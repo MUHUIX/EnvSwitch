@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -16,6 +17,7 @@ import (
 	wrt "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/HUIdada1/envswitch/internal/core"
+	"github.com/HUIdada1/envswitch/internal/netproxy"
 	"github.com/HUIdada1/envswitch/internal/settings"
 	"github.com/HUIdada1/envswitch/internal/sys"
 	"github.com/HUIdada1/envswitch/internal/tools"
@@ -23,11 +25,12 @@ import (
 
 // App 单实例服务。binds 方法名即前端 window.go.app.App.<Method>。
 type App struct {
-	ctx  context.Context
-	mu   sync.Mutex
-	s    *settings.Settings
-	ads  []core.Adapter
-	busy map[string]context.CancelFunc // tool -> 进行中的安装任务（同工具串行）
+	ctx          context.Context
+	mu           sync.Mutex
+	s            *settings.Settings
+	ads          []core.Adapter
+	busy         map[string]context.CancelFunc // tool -> 进行中的安装任务（同工具串行）
+	updateStopCh chan struct{}
 }
 
 func New() *App {
@@ -41,18 +44,65 @@ func New() *App {
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
 	_ = core.EnsureShims(a.s, a.ads) // 模板升级自愈
+	a.startUpdateScheduler()
+}
+
+func (a *App) startUpdateScheduler() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.updateStopCh != nil {
+		close(a.updateStopCh)
+		a.updateStopCh = nil
+	}
+	if !a.s.AutoCheckUpdate {
+		return
+	}
+	stopCh := make(chan struct{})
+	a.updateStopCh = stopCh
+
+	go func() {
+		// 启动后延迟 3 秒做首次自动检查
+		select {
+		case <-time.After(3 * time.Second):
+			a.CheckUpdateNow()
+		case <-stopCh:
+			return
+		}
+
+		// 开启后每小时自动检查更新（仅检测通知，绝不自动安装，安装由用户做决定）
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				a.CheckUpdateNow()
+			case <-stopCh:
+				return
+			}
+		}
+	}()
+}
+
+func (a *App) stopUpdateScheduler() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.updateStopCh != nil {
+		close(a.updateStopCh)
+		a.updateStopCh = nil
+	}
 }
 
 // —— DTO ——
 
 type ToolView struct {
-	ID      string        `json:"id"`
-	Title   string        `json:"title"`
-	Kind    string        `json:"kind"` // runtime | js
-	Group   string        `json:"group"`
-	Current *InstallView  `json:"current"`
-	Lamp    string        `json:"lamp"` // ok / idle / up / off / err —— 设计语言§6 状态灯语义
-	Remote  string        `json:"remoteState"` // fresh / stale / pending / error
+	ID        string        `json:"id"`
+	Title     string        `json:"title"`
+	Kind      string        `json:"kind"` // runtime | js
+	Group     string        `json:"group"`
+	Current   *InstallView  `json:"current"`
+	Lamp      string        `json:"lamp"` // ok / idle / up / off / err —— 设计语言§6 状态灯语义
+	Remote    string        `json:"remoteState"` // fresh / stale / pending / error
+	Installed []string      `json:"installed"`   // 本机可用版本列表（快捷切换）
 }
 
 type InstallView struct {
@@ -97,6 +147,7 @@ type CheckView struct {
 type SettingsView struct {
 	Autostart          bool              `json:"autostart"`
 	CloseToTray        bool              `json:"closeToTray"`
+	AutoCheckUpdate    bool              `json:"autoCheckUpdate"`
 	CheckUpdateOnStart bool              `json:"checkUpdateOnStart"`
 	StorePath          string            `json:"storePath"`
 	Mirrors            map[string]string `json:"mirrors"`
@@ -105,6 +156,92 @@ type SettingsView struct {
 	Version            string            `json:"version"`
 	RemoteState        map[string]string `json:"remoteState"`
 	TotalSize          string            `json:"totalSize"`
+}
+
+type sysDetectCacheItem struct {
+	ver    string
+	source string
+	path   string
+	ts     time.Time
+}
+
+var (
+	sysDetectCache   = map[string]sysDetectCacheItem{}
+	sysDetectCacheMu sync.Mutex
+	verReg           = regexp.MustCompile(`(?i)(?:go|version\s+"?|Python\s+)?v?(\d+\.\d+(?:\.\d+)?(?:[_\.][0-9a-zA-Z]+)?)`)
+)
+
+func (a *App) detectActiveSystemVersion(ad core.Adapter) (string, string, string) {
+	sysDetectCacheMu.Lock()
+	if it, ok := sysDetectCache[ad.ID()]; ok && time.Since(it.ts) < 10*time.Second {
+		sysDetectCacheMu.Unlock()
+		return it.ver, it.source, it.path
+	}
+	sysDetectCacheMu.Unlock()
+
+	exeName := core.PathExeName(ad)
+	if exeName == "" {
+		return "", "", ""
+	}
+	resolved := core.WhichResolved(exeName)
+	if resolved == "" {
+		return "", "", ""
+	}
+
+	source := "系统"
+	if root := core.NvmRoot(); root != "" && strings.HasPrefix(strings.ToLower(resolved), strings.ToLower(root)) {
+		source = "nvm"
+	} else if strings.Contains(strings.ToLower(resolved), "nvm") {
+		source = "nvm"
+	}
+
+	ver := queryVersionFromExe(ad, resolved)
+	if ver == "" {
+		ver = "已检测"
+	}
+
+	sysDetectCacheMu.Lock()
+	sysDetectCache[ad.ID()] = sysDetectCacheItem{ver: ver, source: source, path: resolved, ts: time.Now()}
+	sysDetectCacheMu.Unlock()
+
+	return ver, source, resolved
+}
+
+func queryVersionFromExe(ad core.Adapter, resolved string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
+	defer cancel()
+
+	var args []string
+	switch ad.ID() {
+	case "go":
+		args = []string{"version"}
+	case "java":
+		args = []string{"-version"}
+	case "nvm":
+		args = []string{"version"}
+	case "maven", "gradle", "bun", "php", "node", "npm", "pnpm", "yarn":
+		args = []string{"-v"}
+	case "kubectl":
+		args = []string{"version", "--client"}
+	default:
+		args = []string{"--version"}
+	}
+
+	cmd := exec.CommandContext(ctx, resolved, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	out, err := cmd.CombinedOutput()
+	if err != nil && len(out) == 0 {
+		return ""
+	}
+	m := verReg.FindStringSubmatch(string(out))
+	if len(m) >= 2 {
+		return m[1]
+	}
+	trimmed := strings.TrimSpace(string(out))
+	if idx := strings.Index(trimmed, "\n"); idx > 0 {
+		trimmed = strings.TrimSpace(trimmed[:idx])
+	}
+	return trimmed
 }
 
 // —— 查询接口 ——
@@ -116,15 +253,34 @@ func (a *App) Overview() []ToolView {
 		if _, ok := ad.(core.JSRunner); ok {
 			kind = "js"
 		}
+		installs := core.ListInstalls(ad, a.s)
+		var installedNames []string
+		for _, iv := range installs {
+			installedNames = append(installedNames, iv.Version)
+		}
+
 		cur, _, _ := core.CurrentInstall(ad, a.s)
-		tv := ToolView{ID: ad.ID(), Title: ad.Title(), Kind: kind, Group: ad.Group(), Remote: remoteCacheState(a.s, ad.ID())}
+		tv := ToolView{
+			ID:        ad.ID(),
+			Title:     ad.Title(),
+			Kind:      kind,
+			Group:     ad.Group(),
+			Remote:    remoteCacheState(a.s, ad.ID()),
+			Installed: installedNames,
+		}
 		if cur != nil {
 			tv.Current = &InstallView{Version: cur.Version, Source: cur.Source, Size: core.HumanSize(cur.Size), Active: true, Editable: cur.Editable}
 			tv.Lamp = "ok"
-		} else if len(core.ListInstalls(ad, a.s)) > 0 {
-			tv.Lamp = "idle" // 装了没激活
 		} else {
-			tv.Lamp = "off"
+			// 未在 EnvSwitch 内部激活，实时检测系统当前生效的真实版本
+			if sysVer, sysSrc, _ := a.detectActiveSystemVersion(ad); sysVer != "" {
+				tv.Current = &InstallView{Version: sysVer, Source: sysSrc, Size: "-", Active: true, Editable: false}
+				tv.Lamp = "ok"
+			} else if len(installs) > 0 {
+				tv.Lamp = "idle" // 本地有安装但没激活
+			} else {
+				tv.Lamp = "off"
+			}
 		}
 		out = append(out, tv)
 	}
@@ -139,12 +295,28 @@ func (a *App) Local(tool string) ([]RowView, error) {
 	cur, _, _ := core.CurrentInstall(ad, a.s)
 	installs := core.ListInstalls(ad, a.s)
 	out := make([]RowView, 0, len(installs))
+	hasSys := false
 	for _, iv := range installs {
 		active := cur != nil && cur.Version == iv.Version
+		if iv.Source == "system" || iv.Source == "detected" {
+			hasSys = true
+		}
 		out = append(out, RowView{
 			Version: iv.Version, Source: iv.Source, Size: core.HumanSize(iv.Size),
 			BinDir: iv.BinDir, Active: active,
 		})
+	}
+	if !hasSys {
+		if sysVer, sysSrc, binDir := a.detectActiveSystemVersion(ad); sysVer != "" {
+			active := cur == nil
+			out = append(out, RowView{
+				Version: sysVer,
+				Source:  sysSrc,
+				Size:    "-",
+				BinDir:  binDir,
+				Active:  active,
+			})
+		}
 	}
 	return out, nil
 }
@@ -191,6 +363,7 @@ func (a *App) Settings() SettingsView {
 	sv := SettingsView{
 		Autostart:          a.s.Autostart,
 		CloseToTray:        a.s.CloseToTray,
+		AutoCheckUpdate:    a.s.AutoCheckUpdate,
 		CheckUpdateOnStart: a.s.CheckUpdateOnStart,
 		StorePath:          settings.StoreDir(a.s),
 		Mirrors:            a.s.Mirrors,
@@ -216,6 +389,9 @@ func (a *App) Use(tool, version string) error {
 	if _, _, err := core.UseByName(a.s, ad, version, true); err != nil {
 		return err
 	}
+	sysDetectCacheMu.Lock()
+	delete(sysDetectCache, tool)
+	sysDetectCacheMu.Unlock()
 	a.emitStatus()
 	return nil
 }
@@ -343,8 +519,22 @@ func (a *App) SetField(key, value string) error {
 		a.s.Proxy = value
 	case key == "closeToTray":
 		a.s.CloseToTray = value == "true"
+	case key == "autoCheckUpdate":
+		a.s.AutoCheckUpdate = value == "true"
+		a.s.CheckUpdateOnStart = a.s.AutoCheckUpdate
+		if a.s.AutoCheckUpdate {
+			a.startUpdateScheduler()
+		} else {
+			a.stopUpdateScheduler()
+		}
 	case key == "checkUpdateOnStart":
-		a.s.CheckUpdateOnStart = value == "true"
+		a.s.AutoCheckUpdate = value == "true"
+		a.s.CheckUpdateOnStart = a.s.AutoCheckUpdate
+		if a.s.AutoCheckUpdate {
+			a.startUpdateScheduler()
+		} else {
+			a.stopUpdateScheduler()
+		}
 	case key == "indexCacheMinutes":
 		var n int
 		fmt.Sscanf(value, "%d", &n)
@@ -514,3 +704,33 @@ func selfGuiPath() string {
 
 // BuildVersion 由 core 统一持有（CLI/GUI 共享，见 -ldflags 注入）。
 func BuildVersion() string { return core.BuildVersion() }
+
+// —— 网络代理接口 (参考 AgentHub 设计) ——
+
+func (a *App) NetProxyList() netproxy.NetProxyConfig {
+	return netproxy.GetManager().GetConfig()
+}
+
+func (a *App) NetProxySave(draft netproxy.NetProxyItem) (netproxy.NetProxyItem, error) {
+	return netproxy.GetManager().SaveItem(draft)
+}
+
+func (a *App) NetProxyRemove(id string) error {
+	return netproxy.GetManager().RemoveItem(id)
+}
+
+func (a *App) NetProxyToggle(id string, enabled bool) (netproxy.NetProxyItem, error) {
+	return netproxy.GetManager().ToggleItem(id, enabled)
+}
+
+func (a *App) NetProxySaveSettings(req netproxy.SaveSettingsReq) (netproxy.NetProxyConfig, error) {
+	return netproxy.GetManager().SaveSettings(req)
+}
+
+func (a *App) NetProxyTest(draft netproxy.NetProxyItem) (netproxy.NetProxyTest, error) {
+	return netproxy.GetManager().TestProxy(draft)
+}
+
+func (a *App) NetProxyClashSync() (netproxy.ClashSyncResult, error) {
+	return netproxy.GetManager().SyncClash()
+}

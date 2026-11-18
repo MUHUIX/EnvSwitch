@@ -8,15 +8,48 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/HUIdada1/envswitch/internal/netproxy"
+	"golang.org/x/net/proxy"
 )
 
-var httpClient = &http.Client{Timeout: 30 * time.Minute}
+var httpClient = &http.Client{
+	Timeout: 30 * time.Minute,
+	Transport: &http.Transport{
+		Proxy: func(req *http.Request) (*url.URL, error) {
+			if u, _ := netproxy.GetActiveProxy(); u != nil {
+				if u.Scheme == "http" || u.Scheme == "https" {
+					return u, nil
+				}
+			}
+			return http.ProxyFromEnvironment(req)
+		},
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if u, item := netproxy.GetActiveProxy(); u != nil && item != nil && strings.ToLower(item.Protocol) == "socks5" {
+				var auth *proxy.Auth
+				if item.Username != "" || item.Password != "" {
+					auth = &proxy.Auth{User: item.Username, Password: item.Password}
+				}
+				dialer, err := proxy.SOCKS5("tcp", net.JoinHostPort(item.Host, strconv.Itoa(item.Port)), auth, proxy.Direct)
+				if err != nil {
+					return nil, err
+				}
+				return dialer.Dial(network, addr)
+			}
+			var d net.Dialer
+			return d.DialContext(ctx, network, addr)
+		},
+		TLSHandshakeTimeout: 15 * time.Second,
+	},
+}
 
 // Progress 下载进度回调。
 type Progress func(done, total int64, speedBps float64)

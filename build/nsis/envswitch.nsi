@@ -26,6 +26,7 @@ SetCompressor /SOLID lzma
 !define MUI_UNICON "${ROOT}\build\windows\icon.ico"
 
 ; —— 安装页 ——
+!define MUI_WELCOMEPAGE_TEXT "本安装程序将安装 EnvSwitch ${VERSION}。$\r$\n$\r$\nEnvSwitch 采用 MIT License + 附加使用条款的复合授权（不是纯粹的 MIT 项目）：允许学习、研究与个人非商业使用，禁止商业用途、禁止二次分发牟利、禁止改名换皮冒充官方。继续安装即表示你已阅读并同意安装目录下 LICENSE.txt 中的条款。"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -50,11 +51,15 @@ Section "EnvSwitch"
   File "${ROOT}\build\bin\EnvSwitch.exe"
   File "${ROOT}\build\bin\envs.exe"
   File "${ROOT}\logo.png"
+  ; 许可与第三方声明随安装物一并落地，保证条款对使用者可见
+  File /oname=LICENSE.txt "${ROOT}\LICENSE"
+  File /oname=THIRD-PARTY-NOTICES.txt "${ROOT}\THIRD-PARTY-NOTICES.md"
 
-  ; 快捷方式（开始菜单 + 可选桌面）
+  ; 快捷方式（开始菜单 + 桌面）
   CreateDirectory "$SMPROGRAMS\EnvSwitch"
   CreateShortcut "$SMPROGRAMS\EnvSwitch\EnvSwitch.lnk" "$INSTDIR\EnvSwitch.exe"
   CreateShortcut "$SMPROGRAMS\EnvSwitch\卸载 EnvSwitch.lnk" "$INSTDIR\Uninstall.exe"
+  CreateShortcut "$DESKTOP\EnvSwitch.lnk" "$INSTDIR\EnvSwitch.exe"
 
   ; PATH 全部交给程序自身维护（归属判断单一事实源在 settings.IsOwnedPath）
   nsExec::ExecToLog '"$INSTDIR\envs.exe" path ensure'
@@ -82,8 +87,11 @@ Section "Uninstall"
   Delete "$INSTDIR\EnvSwitch.exe"
   Delete "$INSTDIR\envs.exe"
   Delete "$INSTDIR\logo.png"
+  Delete "$INSTDIR\LICENSE.txt"
+  Delete "$INSTDIR\THIRD-PARTY-NOTICES.txt"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
+  Delete "$DESKTOP\EnvSwitch.lnk"
   Delete "$SMPROGRAMS\EnvSwitch\EnvSwitch.lnk"
   Delete "$SMPROGRAMS\EnvSwitch\卸载 EnvSwitch.lnk"
   RMDir "$SMPROGRAMS\EnvSwitch"

@@ -11,10 +11,9 @@ import (
 func All() []core.Adapter {
 	return []core.Adapter{
 		Node{}, Python{}, Golang{}, Rust{}, Php{}, Deno{}, Bun{},
-		Npm{}, Pnpm{}, Yarn{}, Uv{},
-		Java{}, Maven{}, Gradle{},
-		Dotnet{},
-		Kubectl{}, Terraform{},
+		Npm{}, Pnpm{}, Yarn{}, Pip{}, Nvm{}, Uv{}, Git{},
+		Java{}, Maven{}, Gradle{}, Dotnet{},
+		Docker{}, Kubectl{}, Terraform{}, Redis{},
 	}
 }
 

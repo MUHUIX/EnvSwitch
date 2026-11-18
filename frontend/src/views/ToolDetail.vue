@@ -135,13 +135,12 @@ async function refresh() {
           <Icon :name="tool" :size="38" />
           <div>
             <h2 class="tool-title">{{ tool }}</h2>
-            <div class="tool-desc">基于 Windows Junction 毫秒级重定向 · 零改写全局 PATH · 免管理员</div>
           </div>
         </div>
 
         <div class="current-badge">
           <div class="cur-ver num">{{ current ? current.version : '未激活' }}</div>
-          <div class="cur-note">{{ current ? '当前使用 · 新开终端即时生效' : '点击左侧列表的「切换」即可激活' }}</div>
+          <div class="cur-note" v-if="current">{{ current.source === 'system' ? '系统环境' : (current.source === 'nvm' ? 'nvm 收编' : '已激活') }}</div>
         </div>
       </div>
 

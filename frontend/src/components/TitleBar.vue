@@ -7,7 +7,8 @@ const REPO = 'https://github.com/HUIdada1/EnvSwitch'
 
 const props = defineProps({
   ver: { type: String, default: 'v1.0.0' },
-  isDark: { type: Boolean, default: true }
+  isDark: { type: Boolean, default: true },
+  hasUpdate: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['toggle-theme', 'open-settings'])
@@ -23,19 +24,32 @@ function onToggleMaximize() {
 <template>
   <header class="titlebar" style="--wails-draggable: drag">
     <div class="tb-brand" style="--wails-draggable: drag">
-      <div class="logo-wrap">
-        <img class="tb-logo" src="/logo.png" alt="EnvSwitch" />
+      <div class="logo-wrap" :class="{ 'is-light': !isDark }">
+        <img
+          class="tb-logo dark-logo"
+          :class="{ active: isDark }"
+          src="/logo-dark.png"
+          alt="EnvSwitch"
+        />
+        <img
+          class="tb-logo light-logo"
+          :class="{ active: !isDark }"
+          src="/logo-light.png"
+          alt="EnvSwitch"
+        />
       </div>
       <span class="tb-name">EnvSwitch</span>
-      <span class="tb-author-pill">
-        <span class="author-dot"></span>
-        作者：沐晖
-      </span>
     </div>
 
     <div class="tb-actions" style="--wails-draggable: no-drag">
       <!-- 版本号胶囊 -->
       <span class="tb-pill ver-num">{{ ver || 'v1.0.0' }}</span>
+
+      <!-- 作者信息胶囊（置于版本号右侧） -->
+      <span class="tb-author-pill">
+        <span class="author-dot"></span>
+        作者：沐晖
+      </span>
 
       <!-- GitHub 仓库跳转 -->
       <button class="action-btn" title="GitHub 仓库 · 欢迎 Star" @click="openExternal(REPO)">
@@ -52,8 +66,9 @@ function onToggleMaximize() {
       </button>
 
       <!-- 快捷设置 -->
-      <button class="action-btn" title="首选项与设置" @click="emit('open-settings')">
+      <button class="action-btn pos-rel" title="首选项与设置" @click="emit('open-settings')">
         <Icon name="gear" :size="15" />
+        <span v-if="hasUpdate" class="update-dot" title="有新版本可用"></span>
       </button>
 
       <span class="tb-divider"></span>
@@ -105,23 +120,42 @@ function onToggleMaximize() {
 }
 
 .logo-wrap {
+  position: relative;
   width: 24px;
   height: 24px;
   border-radius: 6px;
   padding: 1px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.03));
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.04));
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+  transition: background 0.25s var(--ease), box-shadow 0.25s var(--ease);
+}
+
+.logo-wrap.is-light {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(225, 232, 240, 0.7));
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
 
 .tb-logo {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 1px;
+  width: calc(100% - 2px);
+  height: calc(100% - 2px);
   border-radius: 5px;
   object-fit: cover;
   display: block;
+  opacity: 0;
+  transform: scale(0.92);
+  transition: opacity 0.22s var(--ease), transform 0.22s var(--ease);
+  pointer-events: none;
+}
+
+.tb-logo.active {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .tb-name {
@@ -156,7 +190,7 @@ function onToggleMaximize() {
 .tb-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .tb-pill {
@@ -168,7 +202,6 @@ function onToggleMaximize() {
   border: 1px solid var(--accent-line);
   border-radius: 6px;
   font-family: var(--font-num);
-  margin-right: 4px;
 }
 
 .action-btn {
@@ -178,19 +211,52 @@ function onToggleMaximize() {
   place-items: center;
   border-radius: 6px;
   color: var(--ink-2);
-  background: transparent;
-  border: 1px solid transparent;
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  cursor: pointer;
   transition: all 0.15s var(--ease);
+}
+
+.pos-rel {
+  position: relative;
+}
+
+.update-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff3b30;
+  box-shadow: 0 0 6px rgba(255, 59, 48, 0.8);
+  animation: pulse-dot 2s infinite ease-in-out;
+  pointer-events: none;
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 4px #ff3b30;
+  }
+  50% {
+    transform: scale(1.25);
+    box-shadow: 0 0 8px #ff453a, 0 0 12px rgba(255, 59, 48, 0.4);
+  }
 }
 
 .action-btn:hover {
   background: var(--surface-raised);
-  border-color: var(--hairline);
+  border-color: var(--hairline-strong);
   color: var(--ink-1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
 }
 
 .action-btn:active {
   transform: scale(0.94);
+  box-shadow: none;
 }
 
 .tb-divider {

@@ -166,11 +166,85 @@ func DetectedOnPATH(exe string) *Install {
 func MachinePATH() string { return sys.MachinePath() }
 func UserPATHRaw() string { v, _ := sys.ReadUserPath(); return v }
 
-// WhichResolved 按 Windows PATH 语义找 exe 的第一个命中（machine 前置 user 后，按系统实际合并顺序）。
+// WhichResolved 按 Windows PATH 语义与常用路径寻找 exe。
 func WhichResolved(exe string) string {
-	got, err := exec.LookPath(exe)
-	if err == nil {
-		return got
+	names := []string{exe}
+	ext := filepath.Ext(exe)
+	if ext == "" {
+		names = append(names, exe+".exe", exe+".cmd", exe+".bat")
+	}
+	for _, n := range names {
+		if got, err := exec.LookPath(n); err == nil && !settings.IsOwnedPath(got) {
+			return got
+		}
+	}
+	// 在用户与系统 PATH 中逐目录排查
+	merged := MachinePATH() + ";" + UserPATHRaw()
+	for _, p := range strings.Split(merged, ";") {
+		p = os.ExpandEnv(strings.TrimSpace(p))
+		if p == "" || settings.IsOwnedPath(p) {
+			continue
+		}
+		for _, n := range names {
+			cand := filepath.Join(p, n)
+			if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+				return cand
+			}
+		}
+	}
+	// 常见 Windows 安装目录直通兜底探测
+	baseName := strings.ToLower(filepath.Base(exe))
+	baseNameNoExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
+	localApp := os.Getenv("LOCALAPPDATA")
+	progFiles := os.Getenv("ProgramFiles")
+	candidates := []string{}
+	switch baseNameNoExt {
+	case "git":
+		candidates = append(candidates, `D:\Git\cmd\git.exe`, `C:\Program Files\Git\cmd\git.exe`, `C:\Program Files\Git\bin\git.exe`)
+	case "nvm":
+		if localApp != "" {
+			candidates = append(candidates, filepath.Join(localApp, "nvm", "nvm.exe"))
+		}
+		candidates = append(candidates, `C:\nvm4w\nvm.exe`)
+	case "pip":
+		if localApp != "" {
+			pyDir := filepath.Join(localApp, "Programs", "Python")
+			if ents, err := os.ReadDir(pyDir); err == nil {
+				for _, e := range ents {
+					candidates = append(candidates, filepath.Join(pyDir, e.Name(), "Scripts", "pip.exe"))
+				}
+			}
+		}
+	case "python":
+		if localApp != "" {
+			pyDir := filepath.Join(localApp, "Programs", "Python")
+			if ents, err := os.ReadDir(pyDir); err == nil {
+				for _, e := range ents {
+					candidates = append(candidates, filepath.Join(pyDir, e.Name(), "python.exe"))
+				}
+			}
+		}
+	case "redis", "redis-cli":
+		candidates = append(candidates, `C:\Program Files\Redis\redis-cli.exe`, `C:\Program Files\Redis\redis-server.exe`)
+	case "node":
+		candidates = append(candidates, `C:\nvm4w\nodejs\node.exe`, filepath.Join(progFiles, "nodejs", "node.exe"))
+	case "go":
+		candidates = append(candidates, filepath.Join(progFiles, "Go", "bin", "go.exe"))
+	case "java":
+		if jh := os.Getenv("JAVA_HOME"); jh != "" {
+			candidates = append(candidates, filepath.Join(jh, "bin", "java.exe"))
+		}
+		javaRoot := filepath.Join(progFiles, "Java")
+		if ents, err := os.ReadDir(javaRoot); err == nil {
+			for _, e := range ents {
+				candidates = append(candidates, filepath.Join(javaRoot, e.Name(), "bin", "java.exe"))
+			}
+		}
+	}
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+			return c
+		}
 	}
 	return ""
 }

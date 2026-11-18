@@ -22,7 +22,7 @@ import (
 func Switch(s *settings.Settings, ad Adapter, inst *Install) error {
 	target := inst.BinDir
 	switch inst.Source {
-	case "store", "nvm", "detected", "external":
+	case "store", "nvm", "detected", "system", "external":
 	default:
 		return W(ErrUsage, "未知来源 %q", inst.Source)
 	}
