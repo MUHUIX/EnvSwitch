@@ -57,8 +57,13 @@ jobs:
       - name: Installer (NSIS)
         shell: pwsh
         run: |
+          # 用固定版本的便携 NSIS，避免 runner 预装版的行为差异（编码/参数）
+          Invoke-WebRequest -Uri "https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11.zip/download" -OutFile nsis.zip
+          Expand-Archive nsis.zip -DestinationPath nsis-portable
+          $makensis = (Get-ChildItem -Path nsis-portable -Recurse -Filter makensis.exe | Select-Object -First 1).FullName
           New-Item -ItemType Directory -Force -Path build\bin\nsis | Out-Null
-          makensis /DVERSION=${{ github.ref_name }} "${{ github.workspace }}\build\nsis\envswitch.nsi"
+          & $makensis /DVERSION=${{ github.ref_name }} "${{ github.workspace }}\build\nsis\envswitch.nsi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Release + update manifest
         uses: softprops/action-gh-release@v2
