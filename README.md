@@ -32,7 +32,9 @@ EnvSwitch 的做法是独立版本库加 junction 重指向。切换就是毫秒
 - `current\<工具>` 是指向当前版本的 junction，切换只改这个链接
 - `bin\shims` 放自动生成的 npm / pnpm / yarn 等命令入口，永远指向稳定路径
 
-PATH 里只插入四条：`current\node`、`current\python`、`current\go` 和 `bin\shims`。因为链接路径不变，切换版本不需要改注册表。已打开的终端不会变，新开的终端立即用新版本，这是 Windows 环境块的机制，不是 bug。
+PATH 里只插入五条：`current\node`、`current\python`、`current\go`、`bin\shims`，以及 `envs.exe` 所在目录。因为链接路径不变，切换版本不需要改注册表。已打开的终端不会变，新开的终端立即用新版本，这是 Windows 环境块的机制，不是 bug。
+
+只有 node、python、go 和 npm / npx / pnpm / pnpx / yarn 会被自动接进 PATH。其余工具装完能管能切，但命令行要自己补一条 `current\<工具>`，一次加好之后切版本不用再动 —— 细节在[使用说明书](docs/使用说明书.md)。
 
 安装走同一条流水线：选源下载、断点续传、哈希校验、解包落位、跑一遍版本号冒烟。npm 系包用 registry 的 `dist.integrity` 校验，node 和 python 用官方哈希。主源挂了会自动试备用源，哈希不对则直接失败删件。
 
@@ -40,13 +42,34 @@ PATH 里只插入四条：`current\node`、`current\python`、`current\go` 和 `
 
 ## 支持的工具
 
-- **运行时**：node.js、python、go、Rust、PHP、Deno、Bun
-- **JS 包管理**：npm、pnpm、yarn classic、uv
-- **JVM**：JDK (Temurin)、Maven、Gradle
-- **.NET**：.NET SDK
-- **云原生**：kubectl、Terraform
+共 17 个，按界面里的分组：
 
-每个工具各自管理版本、镜像源和缓存，互不牵连。镜像默认走国内源（npmmirror、golang.google.cn 等），可以在设置里切官方源或自定义地址。
+- **语言运行时**：node.js、python、Go、Rust、PHP、Deno、Bun
+- **包管理与工具链**：npm、pnpm、yarn classic、uv
+- **企业运行时 (JVM/.NET)**：JDK (Temurin)、Maven、Gradle、.NET SDK
+- **云原生与运维**：kubectl、Terraform
+
+每个工具各自管理版本、镜像源和缓存，互不牵连。node / npm / pnpm / yarn 默认走 npmmirror，Go 默认 golang.google.cn，python 默认先探 GitHub 不通自动退 NJU 镜像，Maven 可切阿里云。前四个能在设置页直接切，python / go / maven 用 `envs config set mirror.<工具> <源>`，见 [使用说明书 §9](docs/使用说明书.md)。
+
+## 安装
+
+从 [Releases](https://github.com/HUIdada1/EnvSwitch/releases) 取用：
+
+| 文件 | 用途 |
+|------|------|
+| `EnvSwitch-Setup-vX.Y.Z.exe` | 安装版，per-user 装到 `%LOCALAPPDATA%\Programs\EnvSwitch`，免管理员 |
+| `EnvSwitch-win-x64.zip` | 免安装，解压即用（含 `EnvSwitch.exe` 与 `envs.exe`） |
+| `SHA256SUMS.txt` | 上面那个 zip 的校验值 |
+
+装完先跑这三条：
+
+```powershell
+envs install node 22.22.0   # 下载 → 哈希校验 → 解包 → 跑一遍 --version
+envs use node 22            # 切换（毫秒级重指 junction），顺带首次写入 PATH
+envs doctor                 # 体检：PATH 顺序、链接健康、共存冲突、WebView2
+```
+
+完整操作手册（界面导览、每个设置项的含义、数据搬家、镜像与代理、故障排查、已知限制）见 **[docs/使用说明书.md](docs/使用说明书.md)**。
 
 ## 命令行
 
@@ -69,7 +92,7 @@ envs gui                        打开桌面应用
 envs self update|rollback       自更新或回滚到上一版
 ```
 
-查询类命令支持 `--json`，方便脚本调用。退出码：0 成功 / 2 参数错 / 3 网络 / 4 校验失败 / 5 权限 / 6 版本歧义。
+`status`、`list`（本机分支）、`doctor`、`config show`、`version` 支持 `--json`，方便脚本调用。退出码：0 成功 / 1 失败或未找到 / 2 参数用法错 / 3 网络 / 4 校验失败 / 5 权限。
 
 ## 桌面端
 
@@ -87,12 +110,13 @@ GUI 基于 Wails v2 + Vue 3，窗口自绘标题栏，关闭默认缩到托盘�
 .\build.ps1 -Gui      # 只构建 EnvSwitch.exe
 ```
 
-产物在 `build\bin\`。手动构建的话，先 `cd frontend && npm install && npm run build`，因为 GUI 的 Go 代码会 embed `frontend/dist`；然后 `go build ./cmd/envs` 和 `wails build`。
+产物在 `build\bin\`。手动构建的话，先 `cd frontend && npm install && npm run build`，因为 GUI 的 Go 代码会 embed `frontend/dist`；然后 `go build ./cmd/envs` 出 CLI，`go build -tags production -ldflags "-H=windowsgui" -o build\bin\EnvSwitch.exe .` 出 GUI（不需要装 wails 命令行）。版本号通过 `-X github.com/HUIdada1/envswitch/internal/core.Version=vX.Y.Z` 注入。
 
 前端单独开发用 `wails dev`，有热更新。
 
 ## 文档
 
+- [使用说明书](docs/使用说明书.md) —— 面向使用者：安装卸载、界面与托盘、命令行全表、配置项、数据搬家、镜像与代理、故障排查、已知限制
 - [架构方案](docs/架构方案.md) —— 选型依据、切换机制、安装流水线、更新协议、里程碑
 - [设计语言](docs/设计语言.md) —— 色板、栅格、组件规范，前端 token 的唯一来源
 

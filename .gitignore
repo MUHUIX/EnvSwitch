@@ -33,3 +33,12 @@ Thumbs.db
 *.old
 *.bak
 update/
+
+# 临时残留
+*.part
+*.tmp
+*~
+
+# AI 工作目录（本机记忆与日志，不入库）
+.workbuddy/
+.workbuddy-ai/
