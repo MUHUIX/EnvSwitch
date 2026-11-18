@@ -58,7 +58,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path build\bin\nsis | Out-Null
-          makensis /INPUTCHARSET UTF8 /DVERSION=${{ github.ref_name }} "${{ github.workspace }}\build\nsis\envswitch.nsi"
+          makensis /DVERSION=${{ github.ref_name }} "${{ github.workspace }}\build\nsis\envswitch.nsi"
 
       - name: Release + update manifest
         uses: softprops/action-gh-release@v2

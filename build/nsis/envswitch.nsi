@@ -1,4 +1,4 @@
-; EnvSwitch per-user NSIS 安装器（免管理员）
+﻿; EnvSwitch per-user NSIS 安装器（免管理员）
 ; 构建：makensis /DVERSION=v1.0.0 build\nsis\envswitch.nsi
 ; 产物：build\bin\nsis\EnvSwitch-Setup-${VERSION}.exe
 
