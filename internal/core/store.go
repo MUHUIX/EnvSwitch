@@ -1,0 +1,246 @@
+package core
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/HUIdada1/envswitch/internal/settings"
+	"github.com/HUIdada1/envswitch/internal/sys"
+)
+
+// ListInstalls 汇总本机版本：store 自有 + 适配器声明的收编来源（如 nvm）。
+func ListInstalls(ad Adapter, s *settings.Settings) []Install {
+	out := scanStore(ad, s)
+	if ex, ok := ad.(interface{ Adopted(s *settings.Settings) []Install }); ok {
+		out = append(out, ex.Adopted(s)...)
+	}
+	sort.Slice(out, func(i, j int) bool { return CompareVersions(out[i].Version, out[j].Version) > 0 })
+	return out
+}
+
+func scanStore(ad Adapter, s *settings.Settings) []Install {
+	dir := settings.ToolStoreDir(s, ad.ID())
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []Install
+	for _, e := range ents {
+		if !e.IsDir() || strings.HasSuffix(e.Name(), ".tmp") || strings.HasSuffix(e.Name(), ".extract") {
+			continue
+		}
+		bin := filepath.Join(dir, e.Name())
+		if ad.BinSub() != "" {
+			bin = filepath.Join(bin, ad.BinSub())
+		}
+		if fi, err := os.Stat(bin); err != nil || !fi.IsDir() {
+			continue // 半残目录不参与列表
+		}
+		out = append(out, Install{
+			Version: e.Name(), Source: "store", BinDir: bin,
+			Size: DirSize(filepath.Join(dir, e.Name())), Editable: true,
+		})
+	}
+	return out
+}
+
+// CurrentInstall 读取工具当前激活 junction 目标，返回对应 Install（可能 source=外部目录）。
+func CurrentInstall(ad Adapter, s *settings.Settings) (*Install, string, error) {
+	link := settings.CurrentLink(s, ad.ID())
+	target, ok := junctionTarget(link)
+	if !ok {
+		return nil, "", nil
+	}
+	ver := versionFromStorePath(ad, s, target)
+	bin := target
+	if ad.BinSub() != "" && strings.Contains(target, filepath.Join("store", ad.ID())) {
+		bin = filepath.Join(target, ad.BinSub())
+	}
+	// nvm 收编目录：target 本身就是版本根（含 node.exe），不再拼 BinSub
+	src := "store"
+	if !strings.Contains(strings.ToLower(target), strings.ToLower(settings.StoreDir(s))) {
+		src = "external"
+		if root := NvmRoot(); root != "" && strings.HasPrefix(strings.ToLower(target), strings.ToLower(root)+`\`) {
+			src = "nvm"
+		}
+	}
+	return &Install{Version: ver, Source: src, BinDir: bin, Size: -1, Active: true, Editable: src == "store"}, target, nil
+}
+
+func versionFromStorePath(ad Adapter, s *settings.Settings, target string) string {
+	rel, err := filepath.Rel(settings.ToolStoreDir(s, ad.ID()), target)
+	if err == nil && !strings.HasPrefix(rel, "..") {
+		return strings.Split(rel, string(filepath.Separator))[0]
+	}
+	// nvm 目录形如 C:\nvm4w\v22.22.0
+	base := filepath.Base(target)
+	base = strings.TrimPrefix(base, "v")
+	return base
+}
+
+// junctionTarget 解析 junction 指向的真实目录。
+// 注意：Go 的 filepath.EvalSymlinks 在 Windows 上不解析 junction（重解析点挂载），
+// 必须走 FSCTL_GET_REPARSE_POINT（真机实测教训）。
+func junctionTarget(link string) (string, bool) {
+	return sys.ReadJunction(link)
+}
+
+// —— nvm-windows 收编（只读）——
+
+var nvmVerDir = regexp.MustCompile(`^v(\d+\.\d+\.\d+)$`)
+
+func NvmRoot() string {
+	candidates := []string{}
+	if v := os.Getenv("NVM_ROOT"); v != "" {
+		candidates = append(candidates, v)
+	}
+	if v := os.Getenv("NVM_HOME"); v != "" {
+		candidates = append(candidates, v)
+	}
+	if ad := os.Getenv("APPDATA"); ad != "" {
+		candidates = append(candidates, filepath.Join(ad, "nvm"))
+	}
+	candidates = append(candidates, `C:\nvm4w`, `C:\Program Files\nodejs\nvm`)
+	for _, c := range candidates {
+		data, err := os.ReadFile(filepath.Join(c, "settings.txt"))
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if rest, ok := strings.CutPrefix(line, "root:"); ok {
+				return strings.TrimSpace(rest)
+			}
+		}
+		return c
+	}
+	return ""
+}
+
+// NvmVersions 列出 nvm-windows 已装 node 版本目录。
+func NvmVersions() []Install {
+	root := NvmRoot()
+	if root == "" {
+		return nil
+	}
+	ents, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var out []Install
+	for _, e := range ents {
+		if m := nvmVerDir.FindStringSubmatch(e.Name()); m != nil {
+			dir := filepath.Join(root, e.Name())
+			out = append(out, Install{
+				Version: m[1], Source: "nvm", BinDir: dir,
+				Size: DirSize(dir), Editable: false,
+			})
+		}
+	}
+	return out
+}
+
+// —— 系统 PATH 检测（只读展示）——
+
+// DetectedOnPATH 在（注册表合并后的）PATH 上找 tool.exe，排除 EnvSwitch 自己的目录。
+func DetectedOnPATH(exe string) *Install {
+	merged := MachinePATH() + ";" + UserPATHRaw()
+	for _, p := range strings.Split(merged, ";") {
+		p = os.ExpandEnv(strings.TrimSpace(p))
+		if p == "" || settings.IsOwnedPath(p) {
+			continue
+		}
+		cand := filepath.Join(p, exe)
+		if _, err := os.Stat(cand); err == nil {
+			return &Install{Version: "detected", Source: "detected", BinDir: p, Size: -1, Editable: false}
+		}
+	}
+	return nil
+}
+
+func MachinePATH() string { return sys.MachinePath() }
+func UserPATHRaw() string { v, _ := sys.ReadUserPath(); return v }
+
+// WhichResolved 按 Windows PATH 语义找 exe 的第一个命中（machine 前置 user 后，按系统实际合并顺序）。
+func WhichResolved(exe string) string {
+	got, err := exec.LookPath(exe)
+	if err == nil {
+		return got
+	}
+	return ""
+}
+
+// CompareVersions 语义化点分数字版本比较（可带前缀 v、可带构建号 20241002）。
+func CompareVersions(a, b string) int {
+	pa, pb := splitVer(a), splitVer(b)
+	for i := 0; i < len(pa) || i < len(pb); i++ {
+		var x, y int
+		if i < len(pa) {
+			x = pa[i]
+		}
+		if i < len(pb) {
+			y = pb[i]
+		}
+		if x != y {
+			if x > y {
+				return 1
+			}
+			return -1
+		}
+	}
+	return 0
+}
+
+func splitVer(v string) []int {
+	v = strings.TrimPrefix(v, "v")
+	if i := strings.IndexAny(v, "+-"); i >= 0 {
+		v = v[:i]
+	}
+	var out []int
+	for _, s := range strings.Split(v, ".") {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			n = 0
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// MatchVersion 在候选里匹配 want：latest / 精确 / 前缀（22 → 22.x 最新）。
+func MatchVersion(vers []string, want string) (string, error) {
+	want = strings.TrimPrefix(strings.TrimSpace(want), "v")
+	if want == "" {
+		return "", W(ErrUsage, "版本不能为空")
+	}
+	if want == "latest" {
+		if len(vers) == 0 {
+			return "", W(ErrNotFound, "没有可用版本")
+		}
+		sorted := append([]string{}, vers...)
+		sort.Slice(sorted, func(i, j int) bool { return CompareVersions(sorted[i], sorted[j]) > 0 })
+		return sorted[0], nil
+	}
+	var hits []string
+	for _, v := range vers {
+		vt := strings.TrimPrefix(v, "v")
+		if vt == want || strings.HasPrefix(vt, want+".") {
+			hits = append(hits, v)
+		}
+	}
+	switch len(hits) {
+	case 1:
+		return hits[0], nil
+	case 0:
+		return "", W(ErrNotFound, "没有匹配 %q 的版本", want)
+	default:
+		// major/minor 别名语义（同 nvm/fnm）：`use node 22` → 最新 22.x
+		sort.Slice(hits, func(i, j int) bool { return CompareVersions(hits[i], hits[j]) > 0 })
+		return hits[0], nil
+	}
+}

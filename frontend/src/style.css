@@ -1,0 +1,303 @@
+/* EnvSwitch 设计系统 —— 简约科技 · 液态玻璃 · 黑暗/明亮双主题 */
+
+/* ===== 暗黑模式（默认） ===== */
+:root {
+  --bg: #0A0C0F;
+  --surface: #11151B;
+  --surface-soft: rgba(255, 255, 255, 0.035);
+  --surface-raised: #171C23;
+  --overlay: #1D232C;
+  --titlebar-bg: rgba(13, 16, 21, 0.78);
+
+  --hairline: rgba(255, 255, 255, 0.075);
+  --hairline-strong: rgba(255, 255, 255, 0.14);
+  --glass-hi: rgba(255, 255, 255, 0.06);
+
+  --ink-1: #E9ECEF;
+  --ink-2: #9BA3AC;
+  --ink-3: #626C76;
+
+  --accent: #3FBFA8;
+  --accent-ink: #A8E6DA;
+  --accent-dim: rgba(63, 191, 168, 0.12);
+  --accent-line: rgba(63, 191, 168, 0.35);
+
+  --ok: #3FBFA8;
+  --warn: #E5B454;
+  --danger: #F26D6D;
+
+  --lamp-off: #3A424B;
+  --lamp-idle: #626C76;
+
+  --font-ui: "Segoe UI Variable Text", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --font-num: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --r-win: 12px;
+  --r-panel: 10px;
+  --r-card: 8px;
+  --r-ctl: 6px;
+}
+
+/* ===== 明亮模式 ===== */
+[data-theme="light"] {
+  --bg: #F4F6F9;
+  --surface: #FFFFFF;
+  --surface-soft: rgba(0, 0, 0, 0.03);
+  --surface-raised: #EAEFF4;
+  --overlay: #FFFFFF;
+  --titlebar-bg: rgba(244, 246, 249, 0.85);
+
+  --hairline: rgba(0, 0, 0, 0.08);
+  --hairline-strong: rgba(0, 0, 0, 0.16);
+  --glass-hi: rgba(255, 255, 255, 0.85);
+
+  --ink-1: #1A202C;
+  --ink-2: #4A5568;
+  --ink-3: #718096;
+
+  --accent: #0E9F85;
+  --accent-ink: #076A58;
+  --accent-dim: rgba(14, 159, 133, 0.1);
+  --accent-line: rgba(14, 159, 133, 0.32);
+
+  --ok: #0E9F85;
+  --warn: #D69E2E;
+  --danger: #E53E3E;
+
+  --lamp-off: #CBD5E0;
+  --lamp-idle: #A0AEC0;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg);
+  color: var(--ink-1);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+  transition: background-color 0.2s var(--ease), color 0.2s var(--ease);
+}
+
+.num {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  outline: none;
+}
+
+input {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* 壳布局 */
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.shell {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg);
+}
+
+.topbar {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--hairline);
+  transition: background-color 0.2s var(--ease);
+}
+
+.crumb {
+  font-size: 13px;
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.crumb b {
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.scroll::-webkit-scrollbar {
+  width: 7px;
+}
+
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border-radius: 999px;
+}
+
+/* 按钮通用 */
+.btn {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-ctl);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--ink-1);
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  transition: all 0.15s var(--ease);
+}
+
+.btn:hover {
+  background: var(--surface-raised);
+  border-color: var(--hairline-strong);
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+  font-weight: 600;
+  box-shadow: 0 2px 8px var(--accent-dim);
+}
+
+.btn.primary:hover {
+  filter: brightness(1.08);
+}
+
+.btn.ghost {
+  background: transparent;
+  border-color: var(--hairline);
+  color: var(--ink-2);
+}
+
+.btn.ghost:hover {
+  background: var(--surface-soft);
+  color: var(--ink-1);
+}
+
+.btn.sm {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 11.5px;
+  gap: 5px;
+}
+
+.btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* 状态指示灯 */
+.lamp {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--lamp-off);
+  transition: all 0.2s var(--ease);
+}
+
+.lamp.ok {
+  background: var(--ok);
+  box-shadow: 0 0 7px var(--ok);
+}
+
+.lamp.idle {
+  background: var(--lamp-idle);
+}
+
+.lamp.up {
+  background: var(--warn);
+  box-shadow: 0 0 7px var(--warn);
+}
+
+.lamp.err {
+  background: var(--danger);
+  box-shadow: 0 0 7px var(--danger);
+}
+
+/* 仪表卡格网 */
+.grid-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.gauge-card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+  transition: border-color 0.2s var(--ease), transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+
+.gauge-card:hover {
+  border-color: var(--hairline-strong);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.gauge-card.dim {
+  opacity: 0.65;
+}
+
+.gauge-card.dim:hover {
+  opacity: 0.95;
+}
