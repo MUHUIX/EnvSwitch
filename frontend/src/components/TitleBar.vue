@@ -5,13 +5,12 @@ import Icon from './Icon.vue'
 
 const REPO = 'https://github.com/MUHUIX/EnvSwitch'
 
-const props = defineProps({
+defineProps({
   ver: { type: String, default: 'v1.0.0' },
-  isDark: { type: Boolean, default: true },
-  hasUpdate: { type: Boolean, default: false }
+  isDark: { type: Boolean, default: true }
 })
 
-const emit = defineEmits(['toggle-theme', 'open-settings'])
+const emit = defineEmits(['toggle-theme'])
 
 const isMaximized = ref(false)
 
@@ -57,10 +56,7 @@ async function onToggleMaximize() {
       <span class="tb-pill ver-num">{{ ver || 'v1.0.0' }}</span>
 
       <!-- 作者信息胶囊（置于版本号右侧） -->
-      <span class="tb-author-pill">
-        <span class="author-dot"></span>
-        作者：沐晖
-      </span>
+      <span class="tb-author-pill">作者：沐晖</span>
 
       <!-- GitHub 仓库跳转 -->
       <button class="action-btn" title="GitHub 仓库 · 欢迎 Star" @click="openExternal(REPO)">
@@ -74,12 +70,6 @@ async function onToggleMaximize() {
         @click="emit('toggle-theme')"
       >
         <Icon :name="isDark ? 'sun' : 'moon'" :size="15" />
-      </button>
-
-      <!-- 快捷设置 -->
-      <button class="action-btn pos-rel" title="首选项与设置" @click="emit('open-settings')">
-        <Icon name="gear" :size="15" />
-        <span v-if="hasUpdate" class="update-dot" title="有新版本可用"></span>
       </button>
 
       <span class="tb-divider"></span>
@@ -179,7 +169,6 @@ async function onToggleMaximize() {
 .tb-author-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
   padding: 2px 8px;
   font-size: 11px;
   font-weight: 500;
@@ -188,14 +177,6 @@ async function onToggleMaximize() {
   border: 1px solid var(--hairline);
   border-radius: 999px;
   transition: background-color 0.2s var(--ease), color 0.2s var(--ease);
-}
-
-.author-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 6px var(--accent);
 }
 
 .tb-actions {
@@ -227,65 +208,6 @@ async function onToggleMaximize() {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   cursor: pointer;
   transition: all 0.15s var(--ease);
-}
-
-.pos-rel {
-  position: relative;
-}
-
-.update-dot {
-  /* 骑在按钮右上角边缘（徽标常规位），不再压住齿轮图标 */
-  position: absolute;
-  top: -2px;
-  right: -2px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #ff3b30;
-  box-shadow: 0 0 6px rgba(255, 59, 48, 0.8);
-  /* 点本体保持稳定，扩散交给 ::after 的雷达环（与全局 .lamp / 侧栏红点同一套语言） */
-  pointer-events: none;
-}
-
-/* 与全局 .lamp 同一套「雷达扩散」语言：状态点一律有环。
-   ::after 绝对定位在流外，不改按钮布局、不吃点击。
-   环的最大直径压到 1.9 倍（.lamp 用 2.6），避免这个贴窗角的徽标溢出标题栏。 */
-.update-dot::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 1px solid #ff3b30;
-  opacity: 0;
-  animation: tb-ripple 2.2s var(--ease, ease-out) infinite;
-  pointer-events: none;
-}
-
-/* keyframes 名带 tb- 前缀，防止与全局/其它组件的动画重名互相覆盖 */
-@keyframes tb-ripple {
-  0% {
-    transform: scale(1);
-    opacity: 0.6;
-  }
-  70% {
-    transform: scale(1.9);
-    opacity: 0;
-  }
-  100% {
-    transform: scale(1.9);
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .update-dot {
-    animation: none;
-  }
-
-  .update-dot::after {
-    animation: none;
-    opacity: 0;
-  }
 }
 
 .action-btn:hover {

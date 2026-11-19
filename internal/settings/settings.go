@@ -10,7 +10,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
+
+// Save 的并发保护：设置页、切换、迁移、环境变量托管都会写同一个
+// settings.json，而落盘用的是固定名 settings.json.tmp。没有这把锁时，
+// 两个写入者的 tmp 会互相覆盖，rename 也可能拿到半截内容。
+var saveMu sync.Mutex
 
 type Settings struct {
 	Version            int               `json:"version"`
@@ -24,7 +30,17 @@ type Settings struct {
 	IndexCacheMinutes  int               `json:"indexCacheMinutes"`
 	EnabledTools       []string          `json:"enabledTools"`
 
+	// 由 EnvSwitch 托管、指向 current\<tool> 的用户环境变量（JAVA_HOME 等）。
+	ManagedEnv []string             `json:"managedEnv,omitempty"`
+	EnvBackup  map[string]EnvBackup `json:"envBackup,omitempty"`
+
 	path string // 磁盘位置，Save 用
+}
+
+// EnvBackup 托管前的用户变量原值：关闭托管或目标版本被删空时恢复它。
+type EnvBackup struct {
+	Had   bool   `json:"had"` // 托管前该变量是否存在
+	Value string `json:"value,omitempty"`
 }
 
 var DefaultMirrors = map[string]string{
@@ -65,6 +81,7 @@ func Load() (*Settings, error) {
 		Mirrors:            map[string]string{},
 		IndexCacheMinutes:  10,
 		EnabledTools:       append([]string{}, DefaultTools...),
+		EnvBackup:          map[string]EnvBackup{},
 	}
 	for k, v := range DefaultMirrors {
 		s.Mirrors[k] = v
@@ -102,10 +119,15 @@ func Load() (*Settings, error) {
 	if len(s.EnabledTools) == 0 {
 		s.EnabledTools = append([]string{}, DefaultTools...)
 	}
+	if s.EnvBackup == nil {
+		s.EnvBackup = map[string]EnvBackup{}
+	}
 	return s, nil
 }
 
 func (s *Settings) Save() error {
+	saveMu.Lock()
+	defer saveMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return err
 	}
@@ -130,7 +152,7 @@ func StoreDir(s *Settings) string {
 	}
 	return filepath.Join(Home(), "store")
 }
-func CurrentDir(s *Settings) string  { return filepath.Join(Home(), "current") }
+func CurrentDir(s *Settings) string   { return filepath.Join(Home(), "current") }
 func DownloadsDir(s *Settings) string { return filepath.Join(Home(), "downloads") }
 func CacheDir(s *Settings) string     { return filepath.Join(Home(), "downloads", "cache") }
 func LogsDir(s *Settings) string      { return filepath.Join(Home(), "logs") }

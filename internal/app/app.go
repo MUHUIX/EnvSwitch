@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +35,13 @@ type App struct {
 	ads          []core.Adapter
 	busy         map[string]context.CancelFunc // tool -> 进行中的安装任务（同工具串行）
 	updateStopCh chan struct{}
+	selfApplying atomic.Bool // 防重复点击「立即更新」并发跑两次自替换
+	storeMoving  atomic.Bool // 版本库迁移中：给前端/入口一个快速拒绝标志
+
+	// opsMu 保护"版本库 + junction"这类跨文件操作：Use/Remove/Install/托管
+	// 持读锁，ChangeStore 持写锁。storeMoving 只能挡住"已经看到标志"的调用，
+	// 挡不住"检查通过后才开始"的窗口，所以真正的互斥要靠这把锁。
+	opsMu sync.RWMutex
 }
 
 func New() *App {
@@ -98,14 +106,14 @@ func (a *App) stopUpdateScheduler() {
 // —— DTO ——
 
 type ToolView struct {
-	ID        string        `json:"id"`
-	Title     string        `json:"title"`
-	Kind      string        `json:"kind"` // runtime | js
-	Group     string        `json:"group"`
-	Current   *InstallView  `json:"current"`
-	Lamp      string        `json:"lamp"` // ok / idle / up / off / err —— 设计语言§6 状态灯语义
-	Remote    string        `json:"remoteState"` // fresh / stale / pending / error
-	Installed []string      `json:"installed"`   // 本机可用版本列表（快捷切换）
+	ID        string       `json:"id"`
+	Title     string       `json:"title"`
+	Kind      string       `json:"kind"` // runtime | js
+	Group     string       `json:"group"`
+	Current   *InstallView `json:"current"`
+	Lamp      string       `json:"lamp"`        // ok / idle / up / off / err —— 设计语言§6 状态灯语义
+	Remote    string       `json:"remoteState"` // fresh / stale / pending / error
+	Installed []string     `json:"installed"`   // 本机可用版本列表（快捷切换）
 }
 
 type InstallView struct {
@@ -120,16 +128,17 @@ type RowView struct {
 	Version string `json:"version"`
 	Source  string `json:"source"` // store / nvm / detected
 	Size    string `json:"size"`
+	RootDir string `json:"rootDir"` // 安装目录（store 为 store\<tool>\<ver>，nvm 为版本目录）
 	BinDir  string `json:"binDir"`
 	Active  bool   `json:"active"`
 }
 
 type RemoteRow struct {
-	Version string `json:"version"`
-	Label   string `json:"label"`
-	Date    string `json:"date"`
-	Size    string `json:"size"`
-	Installed bool  `json:"installed"`
+	Version   string `json:"version"`
+	Label     string `json:"label"`
+	Date      string `json:"date"`
+	Size      string `json:"size"`
+	Installed bool   `json:"installed"`
 }
 
 type ProgressEvent struct {
@@ -159,6 +168,8 @@ type SettingsView struct {
 	Version            string            `json:"version"`
 	RemoteState        map[string]string `json:"remoteState"`
 	TotalSize          string            `json:"totalSize"`
+	InstalledCount     int               `json:"installedCount"`
+	ManagedEnv         []string          `json:"managedEnv"`
 }
 
 type sysDetectCacheItem struct {
@@ -321,9 +332,17 @@ func (a *App) Local(tool string) ([]RowView, error) {
 	out := make([]RowView, 0, len(installs)+1)
 	for _, iv := range installs {
 		active := cur != nil && core.NormVersion(cur.Version) == core.NormVersion(iv.Version)
+		// RootDir 是"这个版本装在哪"：store 版本取 store\<tool>\<ver>，
+		// nvm 收编的目录本身就是版本根。BinDir 只是进 PATH 的那一级（java/go 是 bin 子目录）。
+		root := iv.BinDir
+		if iv.Source == "store" {
+			if cand := settings.VersionDir(a.s, ad.ID(), iv.Version); isDir(cand) {
+				root = cand
+			}
+		}
 		out = append(out, RowView{
 			Version: iv.Version, Source: iv.Source, Size: core.HumanSize(iv.Size),
-			BinDir: iv.BinDir, Active: active,
+			RootDir: root, BinDir: iv.BinDir, Active: active,
 		})
 	}
 	// 系统里实际生效的版本追加为只读行 —— 但只在版本库里没有它的时候。
@@ -336,18 +355,30 @@ func (a *App) Local(tool string) ([]RowView, error) {
 				out[i].Active = true
 			}
 		} else {
+			dir := filepath.Dir(binDir)
 			out = append(out, RowView{
 				Version: sysVer,
 				Source:  sysSrc,
 				Size:    "-",
 				// BinDir 的契约是「junction 应指向的目录」（见 core.Adapter），
 				// 探测给出的是 exe 全路径，这里取所在目录，避免被当作切换目标。
-				BinDir: filepath.Dir(binDir),
-				Active: cur == nil,
+				RootDir: dir,
+				BinDir:  dir,
+				Active:  cur == nil,
 			})
 		}
 	}
 	return out, nil
+}
+
+// Location 该工具"装在哪、怎么进环境"的只读快照：版本库根、各版本目录规则、
+// 激活链接、PATH 注册与相关环境变量。前端详情页据此展示位置与环境配置。
+func (a *App) Location(tool string) (core.ToolLocation, error) {
+	ad := tools.ByID(tool)
+	if ad == nil {
+		return core.ToolLocation{}, core.W(core.ErrUsage, "未知工具 %s", tool)
+	}
+	return core.Locate(ad, a.s), nil
 }
 
 func (a *App) Remote(tool string) ([]RemoteRow, error) {
@@ -401,9 +432,17 @@ func (a *App) Settings() SettingsView {
 		Version:            BuildVersion(),
 		RemoteState:        map[string]string{},
 		TotalSize:          core.HumanSize(core.DirSize(settings.StoreDir(a.s))),
+		ManagedEnv:         core.ManagedEnvSnapshot(a.s),
 	}
+	// 迁移确认要告诉用户"会搬多少个版本"：只数 store 自有版本。
+	// nvm 收编目录不在版本库里，也不会被迁移，算进去会虚高。
 	for _, ad := range a.ads {
 		sv.RemoteState[ad.ID()] = remoteCacheState(a.s, ad.ID())
+		for _, iv := range core.ListInstallsFast(ad, a.s) {
+			if iv.Source == "store" {
+				sv.InstalledCount++
+			}
+		}
 	}
 	return sv
 }
@@ -411,12 +450,23 @@ func (a *App) Settings() SettingsView {
 // —— 动作接口 ——
 
 func (a *App) Use(tool, version string) error {
+	if a.storeMoving.Load() {
+		return core.W(core.ErrUsage, "版本库正在迁移，完成后再切换")
+	}
+	if !a.opsMu.TryRLock() {
+		return core.W(core.ErrUsage, "另一个版本库操作正在进行，请稍候再切换")
+	}
+	defer a.opsMu.RUnlock()
 	ad := tools.ByID(tool)
 	if ad == nil {
 		return core.W(core.ErrUsage, "未知工具 %s", tool)
 	}
 	if _, _, err := core.UseByName(a.s, ad, version, true); err != nil {
 		return err
+	}
+	// 托管变量跟的是版本根，切换后必须重写；失败要让用户看见，不能静默
+	if _, err := core.SyncManagedEnv(a.s, a.ads); err != nil {
+		return fmt.Errorf("已切到 %s，但托管环境变量同步失败（新开的终端可能仍指向旧版本）：%v", version, err)
 	}
 	sysDetectCacheMu.Lock()
 	delete(sysDetectCache, tool)
@@ -427,6 +477,21 @@ func (a *App) Use(tool, version string) error {
 
 // Install 异步启动安装，进度走 event:install。同工具同时只允许一个任务。
 func (a *App) Install(tool, version string) error {
+	if a.storeMoving.Load() {
+		return core.W(core.ErrUsage, "版本库正在迁移，完成后再安装")
+	}
+	if !a.opsMu.TryRLock() {
+		return core.W(core.ErrUsage, "另一个版本库操作正在进行，请稍候再安装")
+	}
+	// 安装是异步的：锁要跨 goroutine 持有，直到整条流水线结束。
+	// 用 locked 标记，提前返回时由 defer 释放，正常启动后交给 goroutine。
+	locked := true
+	defer func() {
+		if locked {
+			a.opsMu.RUnlock()
+		}
+	}()
+
 	ad := tools.ByID(tool)
 	if ad == nil {
 		return core.W(core.ErrUsage, "未知工具 %s", tool)
@@ -441,6 +506,7 @@ func (a *App) Install(tool, version string) error {
 	a.mu.Unlock()
 
 	go func() {
+		defer a.opsMu.RUnlock()
 		defer func() {
 			a.mu.Lock()
 			delete(a.busy, tool)
@@ -449,6 +515,7 @@ func (a *App) Install(tool, version string) error {
 		}()
 		a.runInstall(cctx, ad, version)
 	}()
+	locked = false
 	return nil
 }
 
@@ -508,11 +575,25 @@ func (a *App) CancelInstall(tool string) {
 }
 
 func (a *App) Remove(tool, version string, cascade bool) error {
+	if a.storeMoving.Load() {
+		return core.W(core.ErrUsage, "版本库正在迁移，完成后再卸载")
+	}
+	if !a.opsMu.TryRLock() {
+		return core.W(core.ErrUsage, "另一个版本库操作正在进行，请稍候再卸载")
+	}
+	defer a.opsMu.RUnlock()
 	ad := tools.ByID(tool)
 	if ad == nil {
 		return core.W(core.ErrUsage, "未知工具 %s", tool)
 	}
 	err := core.RemoveVersion(a.s, ad, version, cascade)
+	// 只有目录真的删掉了才同步托管变量；否则会用一个次要错误盖住
+	// "版本不存在/正在使用"这类真正需要用户处理的错误。
+	if err == nil || strings.Contains(err.Error(), "已自动切到") {
+		if _, e := core.SyncManagedEnv(a.s, a.ads); e != nil {
+			return fmt.Errorf("版本已处理，但托管环境变量恢复失败：%v", e)
+		}
+	}
 	a.emitStatus()
 	if err != nil && !strings.Contains(err.Error(), "已自动切到") {
 		return err
@@ -527,6 +608,10 @@ func (a *App) Remove(tool, version string, cascade bool) error {
 }
 
 func (a *App) SetAutostart(on bool) error {
+	if !a.opsMu.TryLock() {
+		return core.W(core.ErrUsage, "版本库操作进行中，请稍候再改设置")
+	}
+	defer a.opsMu.Unlock()
 	if on {
 		exe := selfGuiPath()
 		if exe == "" {
@@ -543,9 +628,22 @@ func (a *App) SetAutostart(on bool) error {
 }
 
 func (a *App) SetField(key, value string) error {
+	// 设置落盘会 marshal 整个 Settings（含 EnvBackup map）。与托管/迁移的
+	// 修改并发会触发 concurrent map read/write，所以这里用写锁串行化。
+	if !a.opsMu.TryLock() {
+		return core.W(core.ErrUsage, "版本库操作进行中，请稍候再改设置")
+	}
+	defer a.opsMu.Unlock()
 	switch {
 	case strings.HasPrefix(key, "mirror."):
-		a.s.Mirrors[strings.TrimPrefix(key, "mirror.")] = value
+		// copy-on-write：Settings() 会把 Mirrors 引用交给 Wails 异步序列化，
+		// 原地写 map 会与序列化并发触发 concurrent map read/write。
+		next := make(map[string]string, len(a.s.Mirrors)+1)
+		for k, v := range a.s.Mirrors {
+			next[k] = v
+		}
+		next[strings.TrimPrefix(key, "mirror.")] = value
+		a.s.Mirrors = next
 	case key == "proxy":
 		a.s.Proxy = value
 	case key == "closeToTray":
@@ -593,9 +691,164 @@ func (a *App) RefreshIndex(tool string) (int, error) {
 }
 
 func (a *App) OpenStoreDir() {
-	if a.ctx != nil {
-		wrt.BrowserOpenURL(a.ctx, "file:///"+strings.ReplaceAll(settings.StoreDir(a.s), `\`, `/`))
+	dir := settings.StoreDir(a.s)
+	// 全新环境里版本库目录可能还没建，先补上再打开
+	_ = os.MkdirAll(dir, 0o755)
+	_ = a.OpenDir(dir)
+}
+
+// OpenDir 在资源管理器打开一个受管目录。只允许 EnvSwitch 自己的
+// home / 版本库 / 程序目录范围，避免前端把任意路径丢进来当文件浏览器。
+func (a *App) OpenDir(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return core.W(core.ErrUsage, "目录为空")
 	}
+	if strings.ContainsAny(path, "<>") {
+		return core.W(core.ErrUsage, "这是目录模板，不是真实路径：%s", path)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return core.W(core.ErrUsage, "路径无法解析：%v", err)
+	}
+	abs = filepath.Clean(abs)
+	if !withinManaged(abs, a.s) {
+		return core.W(core.ErrUsage, "只允许打开 EnvSwitch 受管目录：%s", abs)
+	}
+	fi, err := os.Stat(abs)
+	if err != nil || !fi.IsDir() {
+		return core.W(core.ErrNotFound, "目录不存在：%s", abs)
+	}
+	if a.ctx != nil {
+		u := url.URL{Scheme: "file", Path: "/" + filepath.ToSlash(abs)}
+		wrt.BrowserOpenURL(a.ctx, u.String())
+	}
+	return nil
+}
+
+// —— 版本库迁移与环境变量托管 ——
+
+type StoreMoveEvent struct {
+	Stage   string  `json:"stage"` // scan / move / copy / verify / links / cleanup / done / error
+	Pct     float64 `json:"pct"`
+	Message string  `json:"message"`
+}
+
+// ChangeStore 整体迁移版本库到新目录（不是逐版本自定义：散落的目录无法扫描、
+// 无法统计、卸载时还可能删到用户自己的文件）。
+func (a *App) ChangeStore(path string) error {
+	if !a.storeMoving.CompareAndSwap(false, true) {
+		return core.W(core.ErrUsage, "版本库正在迁移中，请稍候")
+	}
+	defer a.storeMoving.Store(false)
+
+	a.mu.Lock()
+	busy := len(a.busy) > 0
+	a.mu.Unlock()
+	if busy {
+		return core.W(core.ErrUsage, "有安装任务正在进行，完成后再迁移版本库")
+	}
+	if !a.opsMu.TryLock() {
+		return core.W(core.ErrUsage, "有切换/卸载/环境变量操作正在进行，完成后再迁移版本库")
+	}
+	defer a.opsMu.Unlock()
+
+	emit := func(stage string, pct float64, msg string) {
+		if a.ctx != nil {
+			wrt.EventsEmit(a.ctx, "store-migrate", StoreMoveEvent{Stage: stage, Pct: pct, Message: msg})
+		}
+	}
+	if err := core.MoveStore(context.Background(), a.s, a.ads, path, emit); err != nil {
+		emit("error", 0, err.Error())
+		// 可能只差最后一步（如旧目录被占用没删掉）：配置已经指向新根，
+		// 这种"部分成功"也必须刷新界面，否则用户看到的是迁移前的状态。
+		if storeRootChanged(a.s, path) {
+			a.clearSysDetectCache()
+			a.emitStatus()
+		}
+		return err
+	}
+	a.clearSysDetectCache()
+	a.emitStatus()
+	// 托管变量写的是"版本根绝对路径"，迁移后必须重写到新根
+	if _, err := core.SyncManagedEnv(a.s, a.ads); err != nil {
+		return fmt.Errorf("版本库已迁移，但托管环境变量同步失败：%v", err)
+	}
+	return nil
+}
+
+func (a *App) clearSysDetectCache() {
+	sysDetectCacheMu.Lock()
+	sysDetectCache = map[string]sysDetectCacheItem{}
+	sysDetectCacheMu.Unlock()
+}
+
+// storeRootChanged 判断迁移是否已经把配置切到目标根：用于区分"完全失败"与
+// "文件已就位、收尾失败"。
+func storeRootChanged(s *settings.Settings, want string) bool {
+	abs, err := filepath.Abs(want)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(filepath.Clean(settings.StoreDir(s)), filepath.Clean(abs))
+}
+
+// PickDirectory 打开系统目录选择器；用户取消时返回空串与 nil。
+func (a *App) PickDirectory(title, defaultDir string) (string, error) {
+	if a.ctx == nil {
+		return "", core.W(core.ErrUsage, "窗口尚未就绪")
+	}
+	if strings.TrimSpace(title) == "" {
+		title = "选择目录"
+	}
+	// Wails 对不存在的 DefaultDirectory 会直接报错；全新机器上 home\store
+	// 可能还没创建，导致"更改位置"点了没反应。这里退化为不指定默认目录。
+	if defaultDir != "" {
+		if fi, err := os.Stat(defaultDir); err != nil || !fi.IsDir() {
+			defaultDir = ""
+		}
+	}
+	dir, err := wrt.OpenDirectoryDialog(a.ctx, wrt.OpenDialogOptions{
+		Title:            title,
+		DefaultDirectory: defaultDir,
+	})
+	if err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// SetEnvManaged 开启/关闭某个用户环境变量的托管。
+func (a *App) SetEnvManaged(key string, on bool) error {
+	if a.storeMoving.Load() {
+		return core.W(core.ErrUsage, "版本库正在迁移，完成后再修改环境变量")
+	}
+	if !a.opsMu.TryRLock() {
+		return core.W(core.ErrUsage, "另一个版本库操作正在进行，请稍候")
+	}
+	defer a.opsMu.RUnlock()
+	if err := core.SetManagedEnv(a.s, a.ads, key, on); err != nil {
+		return err
+	}
+	a.emitStatus()
+	return nil
+}
+
+func withinManaged(p string, s *settings.Settings) bool {
+	for _, root := range []string{settings.Home(), settings.StoreDir(s), settings.ExeDir()} {
+		r := filepath.Clean(root)
+		if strings.EqualFold(p, r) {
+			return true
+		}
+		if strings.HasPrefix(strings.ToLower(p), strings.ToLower(r)+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+func isDir(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
 }
 
 // TrayVersions 托盘菜单数据：只列可切换的版本（store / nvm 收编），不算目录大小。
@@ -664,44 +917,87 @@ func (a *App) PendingUpdate() UpdateInfo {
 	return lastUpdateCheck
 }
 
-// ApplyUpdate 下载 → 校验 → 自替换 → 带 --updated 重启 → 退出本进程。
+// ApplyUpdate 下载 → 校验解包 → 自替换 → 带 --updated 重启 → 退出本进程。
+// 全程以 tool=self 的 install 事件推「整条流程」的进度（不是单纯下载量）：
+// download 0~85 → unpack 90 → apply 96 → restart 98 → done 100，任一步失败推 error。
 func (a *App) ApplyUpdate() error {
+	if !a.selfApplying.CompareAndSwap(false, true) {
+		return fmt.Errorf("EnvSwitch 正在更新中，请稍候")
+	}
+	restartOK := false
+	defer func() {
+		if !restartOK {
+			a.selfApplying.Store(false)
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	m, asset, err := core.CheckUpdate(ctx, a.s.Proxy, BuildVersion())
-	if err != nil {
-		return err
-	}
-	if m == nil {
-		return core.W(core.ErrNotFound, "当前已是最新版本")
-	}
-	su := core.NewSelfUpdate(a.s)
+
 	ev := func(p ProgressEvent) {
 		p.Tool = "self"
-		wrt.EventsEmit(a.ctx, "install", p)
+		if a.ctx != nil {
+			wrt.EventsEmit(a.ctx, "install", p)
+		}
 	}
+	fail := func(version string, err error) error {
+		ev(ProgressEvent{Stage: "error", Version: version, Message: err.Error()})
+		return err
+	}
+
+	cur := BuildVersion()
+	m, asset, err := core.CheckUpdate(ctx, a.s.Proxy, cur)
+	if err != nil {
+		return fail(cur, err)
+	}
+	if m == nil {
+		return fail(cur, core.W(core.ErrNotFound, "当前已是最新版本"))
+	}
+	su := core.NewSelfUpdate(a.s)
+	su.OnStage = func(stage, msg string) {
+		pct := 90.0
+		if stage == "apply" {
+			pct = 96
+		}
+		ev(ProgressEvent{Stage: stage, Version: m.Version, Pct: pct, Message: msg})
+	}
+	ev(ProgressEvent{Stage: "download", Version: m.Version, Message: "开始下载更新包"})
 	files, err := su.Download(ctx, asset, func(done, total int64, speed float64) {
 		pct := 0.0
 		if total > 0 {
 			pct = float64(done) / float64(total) * 100
 		}
-		ev(ProgressEvent{Stage: "download", Version: m.Version, Pct: pct, Speed: core.HumanSize(int64(speed)) + "/s"})
+		msg := "正在下载更新包"
+		if total > 0 {
+			msg = fmt.Sprintf("正在下载更新包 %s / %s", core.HumanSize(done), core.HumanSize(total))
+		}
+		ev(ProgressEvent{
+			Stage:   "download",
+			Version: m.Version,
+			Pct:     pct * 0.85, // 下载只占整条流程的 85%，剩下的留给解包与替换
+			Speed:   core.HumanSize(int64(speed)) + "/s",
+			Message: msg,
+		})
 	})
 	if err != nil {
-		return err
+		return fail(m.Version, err)
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return err
+		return fail(m.Version, err)
 	}
 	if err := su.Apply(files, exe); err != nil {
-		return err
+		return fail(m.Version, err)
 	}
+	ev(ProgressEvent{Stage: "restart", Version: m.Version, Pct: 98, Message: "替换完成，正在重启…"})
 	cmd := exec.Command(exe, "--updated")
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x00000008 | 0x00000200}
 	if err := cmd.Start(); err != nil {
-		return err
+		return fail(m.Version, fmt.Errorf("新版本已就位但启动失败，请手动打开 EnvSwitch: %w", err))
 	}
+	ev(ProgressEvent{Stage: "done", Version: m.Version, Pct: 100, Message: "更新完成，正在重启 EnvSwitch…"})
+	// 重启已发出：不再释放旗标，本进程马上退出，重复点击没有意义。
+	restartOK = true
 	// 必须标记真退：Quit() 同样走 OnBeforeClose，若不置旗标，closeToTray=true
 	// 时旧进程只隐藏不退，新进程又拿不到单实例锁，热更新会静默失败甚至回滚。
 	a.DisableTrayKeep()
@@ -714,6 +1010,18 @@ func (a *App) Ctx() context.Context { return a.ctx }
 // CloseToTray 读取「关闭时最小化到托盘」设置；退出流程中 quitting
 // 一次性旗标覆盖它，保证真退且不污染持久设置。
 func (a *App) CloseToTray() bool { return a.s.CloseToTray && !a.quitting.Load() }
+
+// CloseWindow 供标题栏关闭按钮调用。wails 前端 runtime 没有 WindowClose
+// （window.js 只暴露 Hide/Show/Minimise/Maximise），JS 直调是 undefined，
+// 静默报错、点了没反应。这里从 Go 侧走 Quit()：与托盘「退出」、热更新重启
+// 同一条路——OnBeforeClose 里 closeToTray=true 则隐藏到托盘，false 则真退。
+// 不用 wrt.WindowClose：它直接 DestroyWindow，绕过 OnBeforeClose，
+// 会把「关闭到托盘」变成无托盘可回的真退。
+func (a *App) CloseWindow() {
+	if a.ctx != nil {
+		wrt.Quit(a.ctx)
+	}
+}
 
 func (a *App) Autostart() bool { return a.s.Autostart }
 

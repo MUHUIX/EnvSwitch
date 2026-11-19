@@ -1,6 +1,6 @@
 <script setup>
-import { ref, computed, inject, onMounted } from 'vue'
-import { api, openExternal } from '../bridge'
+import { ref, computed, inject, onMounted, onUnmounted } from 'vue'
+import { api, on, openExternal } from '../bridge'
 import Icon from '../components/Icon.vue'
 
 const toast = inject('toast')
@@ -10,6 +10,18 @@ const checkingUpdate = ref(false)
 const updateInfo = ref(null)
 const updateMsg = ref('')
 const applyingUpdate = ref(false)
+// tool === 'self' 的 install 事件驱动：{ stage, pct, speed, message }
+const selfProg = ref(null)
+const selfError = ref('')
+const notesOpen = ref(false)
+const skipVer = ref(localStorage.getItem('envswitch-skip-update') || '')
+
+// —— 版本库迁移 ——
+// 只支持"整体换盘"：目标必须是空目录，后端负责迁移、校验、重建 junction，
+// 失败自动回滚；这里只做确认与进度展示。
+const storeConfirm = ref('') // 待确认的新路径
+const storeBusy = ref(false)
+const storeProg = ref(null) // { stage, pct, message }
 
 // 构建版本号统一带 v 前缀（-ldflags 注入的是 tag 名），展示层不再重复拼 v；
 // dev 等非数字版本保持原样，避免出现 "vdev"。
@@ -20,30 +32,184 @@ function tagVer(v) {
 }
 const verText = computed(() => tagVer(st.value?.version || '1.0.0'))
 
+// —— 更新说明 ——
+// release 正文是一份 Markdown。这里不引 md 渲染器，只把它压成「一句概述 + 若干要点」：
+// 标题符号、表格、下载文件清单、加粗与行内代码全部剥掉，默认最多列 5 条，
+// 剩下的看用户要不要展开。
+const NOTE_LIMIT = 5
+
+function cleanMd(s) {
+  return String(s)
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function parseNotes(raw) {
+  const items = []
+  let summary = ''
+  if (!raw) return { summary, items }
+  let skipSection = false
+  for (const line of String(raw).split(/\r?\n/)) {
+    const t = line.trim()
+    if (!t) continue
+    if (/^#{1,6}\s/.test(t)) {
+      // 小节标题只用来识别「下载 / 安装方式」这类不该占更新卡片的段落
+      skipSection = /下载|安装方式|校验值|文件清单/.test(t)
+      continue
+    }
+    if (skipSection) continue
+    if (t.startsWith('|') || t.startsWith('>') || t.startsWith('![') || /^:?-{3,}:?$/.test(t)) continue
+    const bullet = t.match(/^(?:[-*+]|\d+[.)])\s+(.+)$/)
+    if (bullet) {
+      const txt = cleanMd(bullet[1])
+      if (txt) items.push(txt)
+      continue
+    }
+    if (!summary) summary = cleanMd(t)
+  }
+  return { summary, items }
+}
+
+const notes = computed(() => parseNotes(updateInfo.value?.notes))
+const shownNotes = computed(() =>
+  notesOpen.value ? notes.value.items : notes.value.items.slice(0, NOTE_LIMIT)
+)
+const moreCount = computed(() => Math.max(0, notes.value.items.length - NOTE_LIMIT))
+
+// —— 更新进度 ——
+const STAGE_LABEL = {
+  download: '下载更新包',
+  unpack: '校验并解包',
+  apply: '替换程序文件',
+  restart: '重启应用',
+  done: '更新完成'
+}
+const progPct = computed(() => Math.max(0, Math.min(100, Math.round(Number(selfProg.value?.pct) || 0))))
+const progLabel = computed(() => selfProg.value?.message || STAGE_LABEL[selfProg.value?.stage] || '准备中')
+
+const showUpdateCard = computed(
+  () => !!updateInfo.value?.available && skipVer.value !== updateInfo.value.version
+)
+
+function setUpdate(u) {
+  if (!u?.available) return
+  updateInfo.value = u
+  updateMsg.value = `发现新版本 ${tagVer(u.version)}`
+  notesOpen.value = false
+  selfError.value = ''
+}
+
+function skipUpdate() {
+  const v = updateInfo.value?.version
+  if (!v) return
+  skipVer.value = v
+  localStorage.setItem('envswitch-skip-update', v)
+  updateMsg.value = `已暂不更新 ${tagVer(v)}，有更新的版本时再提醒`
+}
+
+function restoreUpdate() {
+  skipVer.value = ''
+  localStorage.removeItem('envswitch-skip-update')
+  if (updateInfo.value?.available) updateMsg.value = `发现新版本 ${tagVer(updateInfo.value.version)}`
+}
+
+let offUpdate = () => {}
+let offInstall = () => {}
+let offStore = () => {}
+
 onMounted(async () => {
   try {
     st.value = await api.settings()
-    const p = await api.pendingUpdate()
-    if (p?.available) {
-      updateInfo.value = p
-      updateMsg.value = `发现新版本 ${tagVer(p.version)}`
-    }
+    setUpdate(await api.pendingUpdate())
   } catch (err) {
     // 降级保护
   }
+  offUpdate = on('update', setUpdate)
+  offInstall = on('install', (p) => {
+    if (p.tool !== 'self') return
+    if (p.stage === 'error') {
+      applyingUpdate.value = false
+      selfProg.value = null
+      selfError.value = p.message || '更新失败'
+      return
+    }
+    selfError.value = ''
+    selfProg.value = { stage: p.stage, pct: p.pct, speed: p.speed, message: p.message }
+  })
+  offStore = on('store-migrate', (p) => {
+    if (!storeBusy.value) return
+    storeProg.value = { stage: p.stage, pct: p.pct, message: p.message }
+  })
 })
+
+onUnmounted(() => {
+  offUpdate()
+  offInstall()
+  offStore()
+})
+
+async function refreshSettings() {
+  try {
+    st.value = await api.settings()
+  } catch (e) {
+    // 降级保护：保留旧值，下次进入设置页再取
+  }
+}
+
+async function pickStoreDir() {
+  if (storeBusy.value) return
+  try {
+    const dir = await api.pickDirectory('选择新的版本库目录（必须是空目录）', st.value?.storePath || '')
+    if (dir) storeConfirm.value = dir
+  } catch (e) {
+    toast(String(e), 'err')
+  }
+}
+
+function samePath(a, b) {
+  if (!a || !b) return false
+  const norm = (p) => String(p).replace(/[\\/]+$/, '').toLowerCase()
+  return norm(a) === norm(b)
+}
+
+async function doChangeStore() {
+  if (storeBusy.value || !storeConfirm.value) return
+  const target = storeConfirm.value
+  storeBusy.value = true
+  storeProg.value = { stage: 'scan', pct: 0, message: '准备迁移…' }
+  try {
+    await api.changeStore(target)
+    storeConfirm.value = ''
+    await refreshSettings()
+    toast('版本库已迁移')
+  } catch (e) {
+    toast(String(e), 'err')
+    // 可能只是收尾失败（旧目录被占用），配置已经切过去了：刷新并收起确认条
+    await refreshSettings()
+    if (samePath(st.value?.storePath, target)) storeConfirm.value = ''
+  } finally {
+    storeBusy.value = false
+    storeProg.value = null
+  }
+}
 
 async function checkUpdate() {
   checkingUpdate.value = true
   updateMsg.value = '正在检查更新…'
+  selfProg.value = null
+  selfError.value = ''
   try {
     const res = await api.checkUpdateNow()
-    updateInfo.value = res
     if (res?.available) {
-      updateMsg.value = `发现新版本 ${tagVer(res.version)}`
+      setUpdate(res)
     } else if (res?.error) {
       updateMsg.value = `检查失败：${res.error}`
     } else {
+      updateInfo.value = null
       updateMsg.value = '当前已是最新版本'
     }
   } catch (e) {
@@ -54,12 +220,17 @@ async function checkUpdate() {
 }
 
 async function doApplyUpdate() {
+  if (applyingUpdate.value) return
   applyingUpdate.value = true
+  selfError.value = ''
+  selfProg.value = { stage: 'download', pct: 0, speed: '', message: '正在准备更新…' }
   try {
     await api.applyUpdate()
+    // 成功路径不返回：进度事件推到 100% 后进程随即重启
   } catch (e) {
     applyingUpdate.value = false
-    toast(String(e), 'err')
+    selfProg.value = null
+    selfError.value = String(e).replace(/^(Error|error)\s*:\s*/, '')
   }
 }
 
@@ -67,8 +238,10 @@ async function setKv(k, v) {
   try {
     await api.setField(k, v)
     toast('设置已保存')
+    return true
   } catch (e) {
     toast(String(e), 'err')
+    return false
   }
 }
 
@@ -84,8 +257,10 @@ async function toggleAuto() {
 }
 
 async function toggleField(name) {
-  st.value[name] = !st.value[name]
-  await setKv(name, st.value[name])
+  const prev = st.value[name]
+  st.value[name] = !prev
+  // 迁移/其他版本库操作进行时后端会拒绝写入，开关要退回原状态
+  if (!(await setKv(name, st.value[name]))) st.value[name] = prev
 }
 
 // 反馈跳转：用系统默认浏览器打开 GitHub 的 issue 表单——应用内打开拿不到 GitHub
@@ -222,30 +397,66 @@ const mirrorOpts = {
               </div>
             </div>
 
-            <!-- 检测到新版本时的详细确认区 -->
-            <div class="update-card-box" v-if="updateInfo?.available">
-              <div class="update-card-left">
-                <div class="new-ver-title">新版本 {{ tagVer(updateInfo.version) }} 已准备就绪</div>
-                <div class="new-ver-notes" v-if="updateInfo.notes">{{ updateInfo.notes }}</div>
-                <div class="new-ver-meta">
-                  <span>安装包大小：{{ updateInfo.size }}</span>
-                  <span class="dot">·</span>
-                  <span>原地秒级热替换，崩溃自愈回滚</span>
+            <!-- 发现新版本：要点式说明 + 固定位置的「立即更新」+ 全流程进度 -->
+            <div class="update-card" v-if="showUpdateCard">
+              <div class="uc-head">
+                <span class="uc-tag-new">新版本</span>
+                <span class="uc-ver num">{{ tagVer(updateInfo.version) }}</span>
+                <span class="uc-size num">当前 {{ verText }} · 安装包 {{ updateInfo.size }}</span>
+                <button class="uc-skip" :disabled="applyingUpdate" @click="skipUpdate">暂不更新</button>
+              </div>
+
+              <p class="uc-summary" v-if="notes.summary">{{ notes.summary }}</p>
+
+              <ul class="uc-notes" v-if="notes.items.length">
+                <li v-for="(n, i) in shownNotes" :key="i">{{ n }}</li>
+              </ul>
+
+              <button class="uc-more" v-if="moreCount" @click="notesOpen = !notesOpen">
+                {{ notesOpen ? '收起更新说明' : `展开其余 ${moreCount} 条` }}
+                <Icon class="uc-more-ic" :class="{ open: notesOpen }" name="chevr" :size="11" />
+              </button>
+
+              <div class="uc-prog" v-if="selfProg">
+                <div class="uc-prog-top">
+                  <span>{{ progLabel }}</span>
+                  <span class="uc-prog-num num">
+                    <template v-if="selfProg.stage === 'download' && selfProg.speed">{{ selfProg.speed }} · </template>{{ progPct }}%
+                  </span>
+                </div>
+                <div class="uc-bar">
+                  <div class="uc-bar-fill" :style="{ width: progPct + '%' }"></div>
                 </div>
               </div>
-              <button
-                class="btn primary"
-                :disabled="applyingUpdate"
-                @click="doApplyUpdate"
-              >
-                <Icon name="down" :size="14" />
-                <span>{{ applyingUpdate ? '正在更新…' : '立即更新' }}</span>
-              </button>
+
+              <p class="uc-err" v-if="selfError">
+                <Icon name="alert" :size="13" />
+                <span class="uc-err-txt">{{ selfError }}</span>
+                <a class="uc-dl" href="javascript:void(0)" @click="openExternal(REPO + '/releases/latest')">下载安装包手动更新</a>
+              </p>
+
+              <div class="uc-foot">
+                <a
+                  class="uc-link"
+                  href="javascript:void(0)"
+                  @click="openExternal(REPO + '/releases/tag/' + updateInfo.version)"
+                >查看完整更新说明</a>
+                <span class="uc-hint">原地热替换 · 失败自动回滚</span>
+                <button class="btn primary uc-apply" :disabled="applyingUpdate" @click="doApplyUpdate">
+                  <Icon :name="applyingUpdate ? 'refresh' : 'down'" :size="14" :class="{ spin: applyingUpdate }" />
+                  <span>{{ applyingUpdate ? '正在更新…' : '立即更新' }}</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="uc-skipped" v-else-if="updateInfo?.available">
+              <span>已暂不更新 {{ tagVer(updateInfo.version) }}</span>
+              <a class="uc-link" href="javascript:void(0)" @click="restoreUpdate">重新显示</a>
             </div>
           </div>
         </section>
 
-        <!-- 网络与索引缓存 -->
+<!-- 网络与索引缓存 -->
         <section class="cfg-group">
           <div class="group-header">
             <h4 class="group-title">网络与代理加速</h4>
@@ -326,14 +537,49 @@ const mirrorOpts = {
             <div class="cfg-row">
               <div class="cfg-info">
                 <span class="cfg-label">版本库实际存储目录</span>
-                <span class="cfg-desc">各个工具版本文件的物理安装路径</span>
+                <span class="cfg-desc">各个工具版本的物理安装路径；可整体换到其他磁盘</span>
               </div>
               <div class="cfg-ctrl path-row">
                 <input class="cfg-input wide-input num" :value="st.storePath" readonly />
+                <button
+                  class="btn sm ghost open-dir-btn"
+                  :disabled="storeBusy"
+                  title="更换版本库所在磁盘或目录"
+                  @click="pickStoreDir"
+                >
+                  <Icon name="swap" :size="13" />
+                  <span>更改位置</span>
+                </button>
                 <button class="btn sm ghost open-dir-btn" @click="api.openStoreDir()" title="在文件资源管理器中打开">
                   <Icon name="folder" :size="13" />
                   <span>打开目录</span>
                 </button>
+              </div>
+            </div>
+
+            <!-- 迁移确认：先选目录，再明确告知要搬多少版本、失败会回滚 -->
+            <div v-if="storeConfirm && !storeBusy" class="store-confirm">
+              <div class="sc-main">
+                <span class="sc-title">迁移版本库到新位置？</span>
+                <span class="sc-path num" :title="storeConfirm">{{ storeConfirm }}</span>
+                <span class="sc-note">
+                  将整体搬走 {{ st.installedCount || 0 }} 个已装版本（目录必须是空的），迁移期间请勿关闭应用；
+                  失败会自动回滚，原目录不受影响。
+                </span>
+              </div>
+              <div class="sc-actions">
+                <button class="btn sm ghost" @click="storeConfirm = ''">取消</button>
+                <button class="btn sm primary" @click="doChangeStore">确认迁移</button>
+              </div>
+            </div>
+
+            <div v-if="storeBusy && storeProg" class="store-prog">
+              <div class="sp-top">
+                <span>{{ storeProg.message || '迁移中…' }}</span>
+                <span class="num">{{ Math.round(storeProg.pct || 0) }}%</span>
+              </div>
+              <div class="sp-bar">
+                <div class="sp-fill" :style="{ width: Math.max(0, Math.min(100, storeProg.pct || 0)) + '%' }"></div>
               </div>
             </div>
 
@@ -534,7 +780,7 @@ const mirrorOpts = {
 .toggle.on {
   background: var(--accent);
   border-color: var(--accent);
-  box-shadow: 0 0 10px rgba(63, 191, 168, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 10px var(--accent-line), inset 0 1px 1px rgba(255, 255, 255, 0.2);
 }
 
 .toggle-ball {
@@ -678,6 +924,8 @@ const mirrorOpts = {
 .path-row {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -699,6 +947,91 @@ const mirrorOpts = {
   border: 1px solid var(--accent-line);
   padding: 3px 10px;
   border-radius: 6px;
+}
+
+/* 版本库迁移：确认条与进度条都贴在「本地存储」面板里 */
+.store-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 12px 16px;
+  padding: 12px 14px;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-ctl);
+}
+
+.sc-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sc-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.sc-path {
+  font-size: 11.5px;
+  color: var(--warn);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sc-note {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+.sc-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.store-prog {
+  margin: 12px 16px;
+  padding: 10px 14px;
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-ctl);
+}
+
+.sp-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+.sp-top > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sp-bar {
+  height: 5px;
+  background: var(--hairline-strong);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.sp-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.18s var(--ease);
 }
 
 /* ================== 关于面板 ================== */
@@ -785,41 +1118,253 @@ const mirrorOpts = {
   margin-bottom: 2px;
 }
 
-.update-card-box {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  margin: 0 16px 14px;
-  background: var(--surface-soft);
-  border: 1px solid var(--accent-line);
-  border-radius: var(--r-ctl);
-  gap: 16px;
-}
-
-.update-card-left {
+/* ================== 发现新版本：更新卡片 ================== */
+.update-card {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 9px;
+  margin: 2px 16px 14px;
+  padding: 12px 14px;
+  background: var(--surface-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 10px;
 }
 
-.new-ver-title {
-  font-size: 13px;
-  font-weight: 600;
+.uc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.uc-tag-new {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent-ink);
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  padding: 1px 8px;
+  flex: none;
+}
+
+.uc-ver {
+  font-size: 14px;
+  font-weight: 700;
   color: var(--ink-1);
+  letter-spacing: -0.01em;
 }
 
-.new-ver-notes {
+.uc-size {
+  flex: 1;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.uc-skip {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-3);
+  background: none;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 5px;
+  transition: all 0.15s var(--ease);
+}
+
+.uc-skip:hover:not([disabled]) {
+  color: var(--ink-1);
+  background: var(--surface-raised);
+}
+
+.uc-skip[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.uc-summary {
+  margin: 0;
   font-size: 12px;
+  line-height: 1.55;
   color: var(--ink-2);
 }
 
-.new-ver-meta {
+.uc-notes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.uc-notes li {
+  position: relative;
+  padding-left: 13px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.uc-notes li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 6px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.7;
+}
+
+.uc-more {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
-  color: var(--ink-3);
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.uc-more:hover {
+  text-decoration: underline;
+}
+
+.uc-more-ic {
+  transition: transform 0.18s var(--ease);
+}
+
+.uc-more-ic.open {
+  transform: rotate(90deg);
+}
+
+/* —— 进度：下载 → 校验解包 → 替换 → 重启，一条进度条走完全程 —— */
+.uc-prog {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.uc-prog-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.uc-prog-num {
+  flex: none;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.uc-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--hairline-strong);
+  overflow: hidden;
+}
+
+.uc-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-line);
+  transition: width 0.35s var(--ease);
+}
+
+.uc-err {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--danger);
+  word-break: break-all;
+}
+
+.uc-foot {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 12px;
+  padding-top: 1px;
+  border-top: 1px solid var(--hairline);
+  margin-top: 1px;
+}
+
+.uc-hint {
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+/* 主操作固定在卡片右下角，尺寸不随说明文字长度变化 */
+.uc-apply {
+  margin-left: auto;
+  flex: none;
+  width: 116px;
+  height: 32px;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.uc-err-txt {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}
+
+/* 跨盘等旧版本固有误操作导致失败时，给一条不再依赖自更新的退路 */
+.uc-dl {
+  flex: none;
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.uc-dl:hover {
+  text-decoration: underline;
+}
+
+.uc-skipped {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 16px 14px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.uc-link {
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.uc-link:hover {
+  text-decoration: underline;
+}
+
+.spin {
+  animation: uc-spin 0.9s linear infinite;
+}
+
+@keyframes uc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
 }
 
 .about-badge.author-badge {

@@ -10,15 +10,28 @@ const nav = inject('nav')
 const locals = ref([])
 const remotes = ref([])
 const current = ref(null)
+const loc = ref(null) // 安装位置与环境配置快照（后端 Location）
 const loading = ref(false)
 const filter = ref('')
 const installing = ref({}) // ver -> {pct, speed}
 const confirmDel = ref('') // 待确认卸载的行标识（source|version，同一版本号可能有两行）
 const removingVer = ref('') // 正在卸载的行标识（同一时刻只允许删一个）
 const state = ref('')
+const copied = ref('') // 刚复制成功的路径，用于图标短暂变成对勾
+
+// 安装确认：先告诉用户会装到哪，再决定是否开跑；也可在这里换版本库
+const pendingInstall = ref('')
+const pendingStore = ref('')
+const storeBusy = ref(false)
+const storeProg = ref(null)
 
 let offInstall = () => {}
+let offStore = () => {}
 onMounted(() => {
+  offStore = on('store-migrate', (p) => {
+    if (!storeBusy.value) return
+    storeProg.value = { stage: p.stage, pct: p.pct, message: p.message }
+  })
   offInstall = on('install', (p) => {
     if (p.tool !== props.tool) return
     if (p.stage === 'download') {
@@ -35,7 +48,10 @@ onMounted(() => {
   })
 })
 
-onUnmounted(() => offInstall())
+onUnmounted(() => {
+  offInstall()
+  offStore()
+})
 
 async function reload() {
   loading.value = true
@@ -47,6 +63,12 @@ async function reload() {
     locals.value = []
   } finally {
     loading.value = false
+  }
+  // 位置信息失败不影响版本列表：详情页主体仍然可用
+  try {
+    loc.value = (await api.location(props.tool)) || null
+  } catch (e) {
+    loc.value = null
   }
 }
 
@@ -71,6 +93,11 @@ function switchTool() {
   installing.value = {}
   confirmDel.value = ''
   removingVer.value = ''
+  loc.value = null
+  copied.value = ''
+  pendingInstall.value = ''
+  pendingStore.value = ''
+  storeProg.value = null
   reload()
 }
 
@@ -113,6 +140,25 @@ function removeHint(r) {
   if (isLastRemovable(r)) return '最后一个版本，先安装其他版本再卸载'
   if (r.active) return '卸载当前生效版本（会自动切到剩余最新）'
   return '卸载此版本'
+}
+
+// 卸载入口的「不可用原因」：空串表示当前可点。
+// 不用 disabled 属性承载它 —— 原生 disabled 按钮在 Chrome/WebView2 下不弹 title 提示，
+// 用户只会觉得按钮点不动又没说明。改用 is-disabled 视觉态 + 点击兜底提示。
+function removeBlocked(r) {
+  if (removingVer.value) return '正在卸载其他版本，请稍候'
+  if (isSystemSource(r.source) || r.source === 'external') return removeHint(r)
+  if (isLastRemovable(r)) return removeHint(r)
+  return ''
+}
+
+function onTrashClick(r) {
+  const why = removeBlocked(r)
+  if (why) {
+    toast(why, 'err')
+    return
+  }
+  confirmDel.value = rowKey(r)
 }
 
 // 行标识：同一份安装可能同时以 store 与 nvm 两个入口出现，不能只用版本号区分。
@@ -176,6 +222,220 @@ async function refresh() {
     toast(String(e), 'err')
   }
 }
+
+// —— 安装位置与环境配置 ——
+
+// 头部当前版本的路径：优先 junction 真实目标，未激活时回落到检测到的目录
+const currentPath = computed(() => loc.value?.currentTarget || current.value?.rootDir || '')
+
+// 上方「安装位置」四格：版本库、本工具目录、激活链接、新版本落点。
+// 路径都可能很长，统一交给 CSS 省略号 + title 展示全文。
+const locFacts = computed(() => {
+  const l = loc.value
+  if (!l) return []
+  return [
+    {
+      key: 'store',
+      label: '版本库根目录',
+      value: l.storeDir,
+      tag: l.storeCustom ? '自定义' : '默认',
+      tagKind: l.storeCustom ? 'warn' : 'ok',
+      openable: true
+    },
+    {
+      key: 'tool',
+      label: '本工具版本目录',
+      value: l.toolStoreDir,
+      tag: '',
+      tagKind: 'plain',
+      openable: true
+    },
+    {
+      key: 'link',
+      label: '当前激活链接',
+      value: l.currentLink,
+      sub: l.currentOk ? '→ ' + l.currentTarget : '尚未建立链接（切一个版本即可生成）',
+      tag: l.currentOk ? '有效' : '未激活',
+      tagKind: l.currentOk ? 'ok' : 'plain',
+      openable: l.currentOk
+    },
+    {
+      key: 'hint',
+      label: '新版本安装位置',
+      value: l.versionHint,
+      sub: '每个版本一个独立目录，互不覆盖',
+      tag: '模板',
+      tagKind: 'plain',
+      openable: false
+    }
+  ]
+})
+
+// 下方「环境配置」：PATH 注册 / 相关环境变量 / JS 命令 shim。
+// PATH 与 shim 只读（由切换自动维护）；环境变量可托管，写入也走同一套后端。
+const envBlocks = computed(() => {
+  const l = loc.value
+  if (!l) return []
+  const blocks = []
+
+  const pathRows = (l.pathEntries || []).map((p) => ({
+    key: 'p:' + p.path,
+    label: p.path,
+    note: [
+      p.role,
+      p.present ? '已注册到用户 PATH' : '未注册',
+      p.exists ? '' : '目录不存在',
+      p.note
+    ].filter(Boolean).join(' · '),
+    state: p.present && p.exists ? 'ok' : (p.exists ? 'idle' : 'warn'),
+    copy: p.path
+  }))
+  if (pathRows.length) blocks.push({ key: 'path', title: 'PATH 注册', rows: pathRows })
+
+  const varRows = (l.envVars || []).map((v) => ({
+    key: 'v:' + v.key,
+    label: v.set ? `${v.key} = ${v.value}` : `${v.key} = 未设置`,
+    note: v.managed
+      ? `${v.note} · 由 EnvSwitch 托管${v.manageKey ? '' : `（在 ${v.manageTool} 页管理）`}，切换版本自动跟随`
+      : v.note,
+    state: v.managed || v.set ? 'ok' : 'idle',
+    copy: v.set ? v.value : '',
+    manageKey: v.manageKey || '',
+    managed: !!v.managed,
+    target: v.target || '',
+    manageTool: v.manageTool || ''
+  }))
+  if (varRows.length) blocks.push({ key: 'env', title: '环境变量', rows: varRows })
+
+  const shimRows = (l.shims || []).map((s) => ({
+    key: 's:' + s.name,
+    label: s.name,
+    note: s.path + (s.exists ? ' · 已生成' : ' · 缺失（切换时自动重建）'),
+    state: s.exists ? 'ok' : 'warn',
+    copy: s.path
+  }))
+  if (shimRows.length) blocks.push({ key: 'shim', title: '命令 shim', rows: shimRows })
+
+  return blocks
+})
+
+async function copyPath(p) {
+  if (!p) return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(p)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = p
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    copied.value = p
+    setTimeout(() => {
+      if (copied.value === p) copied.value = ''
+    }, 1400)
+    toast('路径已复制')
+  } catch (e) {
+    toast('复制失败: ' + e, 'err')
+  }
+}
+
+async function openDir(p) {
+  if (!p) return
+  try {
+    await api.openDir(p)
+  } catch (e) {
+    toast(String(e), 'err')
+  }
+}
+
+// —— 安装确认 ——
+
+const installTarget = computed(() => {
+  if (!loc.value || !pendingInstall.value) return ''
+  return `${loc.value.toolStoreDir}\\${pendingInstall.value}`
+})
+
+function confirmInstall(ver) {
+  pendingInstall.value = ver
+  pendingStore.value = ''
+}
+
+function closeInstall() {
+  if (storeBusy.value) return
+  pendingInstall.value = ''
+  pendingStore.value = ''
+}
+
+// 位置卡上的「更改位置」：不装东西，只走迁移；复用同一个弹层
+function openStoreMove() {
+  pendingInstall.value = ''
+  pendingStore.value = ''
+  pickStoreFromInstall()
+}
+
+function startInstall() {
+  const v = pendingInstall.value
+  pendingInstall.value = ''
+  pendingStore.value = ''
+  if (v) doInstall(v)
+}
+
+async function pickStoreFromInstall() {
+  if (storeBusy.value) return
+  try {
+    const dir = await api.pickDirectory('选择新的版本库目录（必须是空目录）', loc.value?.storeDir || '')
+    if (dir) pendingStore.value = dir
+  } catch (e) {
+    toast(String(e), 'err')
+  }
+}
+
+function samePath(a, b) {
+  if (!a || !b) return false
+  const norm = (p) => String(p).replace(/[\\/]+$/, '').toLowerCase()
+  return norm(a) === norm(b)
+}
+
+// 在安装弹层里换位置：先迁移，成功后再让用户继续安装（不自动开跑）
+async function doMoveStore() {
+  if (storeBusy.value || !pendingStore.value) return
+  const target = pendingStore.value
+  storeBusy.value = true
+  storeProg.value = { stage: 'scan', pct: 0, message: '准备迁移…' }
+  try {
+    await api.changeStore(target)
+    pendingStore.value = ''
+    await reload()
+    toast(pendingInstall.value ? '版本库已迁移，可以继续安装' : '版本库已迁移')
+  } catch (e) {
+    toast(String(e), 'err')
+    // 收尾失败但配置已切走：刷新落点并收起迁移确认
+    await reload()
+    if (samePath(loc.value?.storeDir, target)) pendingStore.value = ''
+  } finally {
+    storeBusy.value = false
+    storeProg.value = null
+  }
+}
+
+// —— 环境变量托管 ——
+
+async function toggleManaged(row) {
+  if (!row.manageKey) return
+  const next = !row.managed
+  try {
+    await api.setEnvManaged(row.manageKey, next)
+    toast(next ? `${row.manageKey} 已托管，切换版本自动跟随` : `${row.manageKey} 已恢复原值`)
+    await reload()
+  } catch (e) {
+    toast(String(e), 'err')
+  }
+}
 </script>
 
 <template>
@@ -211,8 +471,67 @@ async function refresh() {
         <div class="current-badge">
           <div class="cur-ver num">{{ current ? current.version : '未激活' }}</div>
           <div class="cur-note" v-if="current">{{ sourceNote(current.source) }}</div>
+          <div
+            v-if="currentPath"
+            class="cur-path num"
+            :title="currentPath"
+          >{{ currentPath }}</div>
         </div>
       </div>
+
+      <!-- 安装位置：默认/自定义版本库、本工具目录、激活链接、新版本落点 -->
+      <section v-if="loc" class="loc-panel">
+        <div class="panel-head">
+          <h4>安装位置</h4>
+          <div class="loc-head-right">
+            <span class="loc-flag" :class="{ custom: loc.storeCustom }">
+              {{ loc.storeCustom ? '自定义版本库' : '默认版本库' }}
+            </span>
+            <button class="btn ghost sm" title="把版本库整体迁到其他磁盘" @click="openStoreMove">
+              <Icon name="swap" :size="12" />
+              <span>更改位置</span>
+            </button>
+            <button class="btn ghost sm" :title="`打开 ${loc.storeDir}`" @click="openDir(loc.storeDir)">
+              <Icon name="folder" :size="12" />
+              <span>打开版本库</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="loc-grid">
+          <div v-for="f in locFacts" :key="f.key" class="loc-item">
+            <div class="loc-k">
+              <span class="loc-label">{{ f.label }}</span>
+              <span v-if="f.tag" class="loc-tag" :class="f.tagKind">{{ f.tag }}</span>
+              <div class="loc-ops">
+                <button
+                  class="icon-btn"
+                  :title="copied === f.value ? '已复制' : '复制路径'"
+                  :aria-label="`复制 ${f.label}`"
+                  @click="copyPath(f.value)"
+                >
+                  <Icon :name="copied === f.value ? 'check' : 'copy'" :size="13" />
+                </button>
+                <button
+                  v-if="f.openable"
+                  class="icon-btn"
+                  title="打开目录"
+                  :aria-label="`打开 ${f.label}`"
+                  @click="openDir(f.value)"
+                >
+                  <Icon name="folder" :size="13" />
+                </button>
+              </div>
+            </div>
+            <div class="loc-v num" :title="f.value">{{ f.value }}</div>
+            <div v-if="f.sub" class="loc-sub num" :title="f.sub">{{ f.sub }}</div>
+          </div>
+        </div>
+
+        <div v-if="loc.storeCustom" class="loc-foot">
+          当前使用自定义版本库；默认位置为 <span class="num">{{ loc.storeDefault }}</span>
+        </div>
+      </section>
 
       <!-- 版本管理双栏 -->
       <div class="versions-grid">
@@ -233,17 +552,33 @@ async function refresh() {
               :class="{ 'is-active': r.active }"
             >
               <span class="lamp" :class="r.active ? 'ok' : 'idle'"></span>
-              <span class="ver-name num">{{ r.version }}</span>
-              <span class="src-chip" :class="{ nvm: r.source === 'nvm' }">{{ sourceLabel(r.source) }}</span>
-              <span v-if="r.active" class="active-tag">当前生效</span>
-              <span class="size-col num">{{ r.size }}</span>
+
+              <!-- 主行：版本号 / 来源 / 占用；副行：这一版具体装在哪 -->
+              <div class="v-main">
+                <div class="v-top">
+                  <span class="ver-name num">{{ r.version }}</span>
+                  <span class="src-chip" :class="{ nvm: r.source === 'nvm' }">{{ sourceLabel(r.source) }}</span>
+                  <span v-if="r.active" class="active-tag">当前生效</span>
+                  <span class="size-col num">{{ r.size }}</span>
+                </div>
+                <button
+                  v-if="r.rootDir"
+                  class="v-path"
+                  :title="`${r.rootDir}\nPATH 目录：${r.binDir}\n点击复制安装路径`"
+                  @click="copyPath(r.rootDir)"
+                >
+                  <Icon name="folder" :size="11" />
+                  <span class="num">{{ r.rootDir }}</span>
+                </button>
+              </div>
 
               <div class="action-col">
                 <!-- 内联二次确认：非系统行（store 自有 + nvm 收编）一律可卸载，
                      激活行也可卸，只是文案说明卸完会自动切到剩余最新 -->
                 <template v-if="confirmDel === rowKey(r)">
                   <button class="btn sm danger-b" :disabled="!!removingVer" @click="doRemove(r)">
-                    {{ removingVer === rowKey(r) ? '卸载中…' : (r.active ? '确认卸载并切换' : '确认删除') }}
+                    <Icon name="trash" :size="12" />
+                    <span>{{ removingVer === rowKey(r) ? '卸载中…' : (r.active ? '确认卸载并切换' : '确认删除') }}</span>
                   </button>
                   <button class="btn sm ghost" :disabled="!!removingVer" @click="confirmDel = ''">取消</button>
                 </template>
@@ -261,12 +596,14 @@ async function refresh() {
                   </button>
                   <span v-else-if="r.source !== 'store'" class="ro-tag">收编自 {{ sourceLabel(r.source) }}</span>
                   <button
-                    class="btn sm ghost icon-only trash-btn"
-                    :disabled="!!removingVer || isLastRemovable(r) || r.source === 'external'"
+                    class="icon-btn trash-btn"
+                    :class="{ 'is-ready': r.active, 'is-disabled': !!removeBlocked(r) }"
+                    :aria-disabled="!!removeBlocked(r) || null"
                     :title="removeHint(r)"
-                    @click="confirmDel = rowKey(r)"
+                    :aria-label="removeHint(r)"
+                    @click="onTrashClick(r)"
                   >
-                    <Icon name="trash" :size="13" />
+                    <Icon name="trash" :size="14" />
                   </button>
                 </template>
               </div>
@@ -311,7 +648,11 @@ async function refresh() {
               <template v-else-if="!r.installed">
                 <span class="size-col num">{{ r.size }}</span>
                 <div class="action-col">
-                  <button class="btn sm primary" @click="doInstall(r.version)">
+                  <button
+                    class="btn sm primary"
+                    :title="loc ? `安装到 ${loc.toolStoreDir}\\${r.version}` : `安装 ${r.version}`"
+                    @click="confirmInstall(r.version)"
+                  >
                     <Icon name="down" :size="12" />
                     <span>安装</span>
                   </button>
@@ -319,6 +660,115 @@ async function refresh() {
               </template>
               <span v-else class="size-col"></span>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 环境配置：PATH 注册 / 相关环境变量 / 命令 shim，全部只读 -->
+      <section v-if="loc" class="env-panel">
+        <div class="panel-head">
+          <h4>环境配置</h4>
+          <span class="badge-count">PATH 与 shim 自动维护 · 环境变量可托管</span>
+        </div>
+        <div v-if="!envBlocks.length" class="empty-hint">
+          该工具没有需要额外注册的 PATH 条目或环境变量
+        </div>
+        <div v-else class="env-grid">
+          <div v-for="b in envBlocks" :key="b.key" class="env-block">
+            <div class="env-title">
+              <span>{{ b.title }}</span>
+              <span class="env-count">{{ b.rows.length }}</span>
+            </div>
+            <div v-for="row in b.rows" :key="row.key" class="env-row">
+              <span class="env-dot" :class="row.state"></span>
+              <div class="env-main">
+                <div class="env-line num" :title="row.label">{{ row.label }}</div>
+                <div class="env-note">{{ row.note }}</div>
+              </div>
+              <button
+                v-if="row.copy"
+                class="icon-btn env-copy"
+                :title="copied === row.copy ? '已复制' : '复制'"
+                @click="copyPath(row.copy)"
+              >
+                <Icon :name="copied === row.copy ? 'check' : 'copy'" :size="12" />
+              </button>
+              <button
+                v-if="row.manageKey"
+                class="toggle env-toggle"
+                :class="{ on: row.managed }"
+                :title="row.managed ? '取消托管，恢复托管前的值' : `托管为 ${row.target}（切换版本自动跟随）`"
+                :aria-pressed="row.managed"
+                @click="toggleManaged(row)"
+              >
+                <i class="toggle-ball"></i>
+              </button>
+              <span
+                v-else-if="row.managed"
+                class="managed-chip"
+                :title="`由 ${row.manageTool} 的激活链接托管`"
+              >托管</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 安装确认：先给落点，再决定开跑；也可以在这里换版本库 -->
+    <div v-if="pendingInstall || pendingStore" class="modal-backdrop" @click.self="closeInstall">
+      <div class="modal-card">
+        <div class="modal-head">
+          <span class="modal-title">
+            {{ pendingInstall ? `安装 ${tool} ${pendingInstall}` : '迁移版本库' }}
+          </span>
+          <button class="modal-close" :disabled="storeBusy" @click="closeInstall">✕</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="pendingInstall" class="it-block">
+            <span class="it-label">将安装到</span>
+            <span class="it-path num" :title="installTarget">{{ installTarget }}</span>
+          </div>
+          <p v-if="pendingInstall" class="it-note">
+            每个版本一个独立目录，切换只改 junction 链接、不复制文件；安装完成后可在「本机已安装」里切到该版本。
+          </p>
+
+          <div v-if="pendingStore && !storeBusy" class="move-box">
+            <span class="mb-title">顺带把版本库迁到新位置？</span>
+            <span class="mb-path num" :title="pendingStore">{{ pendingStore }}</span>
+            <span class="mb-note">
+              会整体搬走全部已装版本（目标必须是空目录），迁移期间请勿关闭应用；失败自动回滚，原目录不受影响。
+            </span>
+          </div>
+
+          <div v-if="storeBusy && storeProg" class="move-prog">
+            <div class="mp-top">
+              <span>{{ storeProg.message || '迁移中…' }}</span>
+              <span class="num">{{ Math.round(storeProg.pct || 0) }}%</span>
+            </div>
+            <div class="mp-bar">
+              <div class="mp-fill" :style="{ width: Math.max(0, Math.min(100, storeProg.pct || 0)) + '%' }"></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn sm ghost" :disabled="storeBusy" @click="pickStoreFromInstall">
+            <Icon name="swap" :size="12" />
+            <span>更改版本库位置</span>
+          </button>
+          <div class="foot-right">
+            <button class="btn sm ghost" :disabled="storeBusy" @click="closeInstall">取消</button>
+            <button v-if="pendingStore" class="btn sm primary" :disabled="storeBusy" @click="doMoveStore">
+              确认迁移
+            </button>
+            <button
+              v-if="pendingInstall"
+              class="btn sm primary"
+              :disabled="storeBusy"
+              :title="pendingStore ? '不迁移，直接装到当前版本库' : `安装到 ${installTarget}`"
+              @click="startInstall"
+            >
+              {{ pendingStore ? '直接安装' : '开始安装' }}
+            </button>
           </div>
         </div>
       </div>
@@ -375,6 +825,244 @@ async function refresh() {
   color: var(--ink-3);
 }
 
+/* 当前生效版本的真实目录：认路径比认版本号更直接 */
+.cur-path {
+  max-width: 340px;
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* —— 安装位置卡 —— */
+.loc-panel {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+  padding: 16px;
+}
+
+.loc-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.loc-flag {
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--accent-ink);
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-line);
+}
+
+.loc-flag.custom {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-line);
+}
+
+.loc-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.loc-item {
+  min-width: 0;
+  padding: 9px 10px 10px;
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-ctl);
+}
+
+.loc-k {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.loc-label {
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.loc-tag {
+  font-size: 9.5px;
+  line-height: 1.5;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--hairline);
+  color: var(--ink-3);
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+.loc-tag.ok {
+  color: var(--accent-ink);
+  background: var(--accent-dim);
+  border-color: var(--accent-line);
+}
+
+.loc-tag.warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-line);
+}
+
+/* 复制/打开：常态安静，悬停整格时浮出 */
+.loc-ops {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0.45;
+  transition: opacity 0.14s var(--ease);
+}
+
+.loc-item:hover .loc-ops,
+.loc-ops:focus-within {
+  opacity: 1;
+}
+
+.loc-v {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--ink-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.loc-sub {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.loc-foot {
+  margin-top: 10px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+/* —— 环境配置卡 —— */
+.env-panel {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+  padding: 16px;
+}
+
+.env-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.env-block {
+  min-width: 0;
+}
+
+.env-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--hairline);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.env-count {
+  font-family: var(--font-num);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
+.env-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: var(--r-ctl);
+  transition: background-color 0.14s var(--ease);
+}
+
+.env-row:hover {
+  background: var(--surface-raised);
+}
+
+/* 静态状态点：环境行一多，呼吸灯会变成噪声 */
+.env-dot {
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--lamp-off);
+}
+
+.env-dot.ok {
+  background: var(--ok);
+}
+
+.env-dot.idle {
+  background: var(--lamp-idle);
+}
+
+.env-dot.warn {
+  background: var(--warn);
+}
+
+.env-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.env-line {
+  font-size: 11.5px;
+  color: var(--ink-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.env-note {
+  margin-top: 2px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+.env-copy {
+  opacity: 0;
+}
+
+.env-row:hover .env-copy,
+.env-copy:focus-visible {
+  opacity: 1;
+}
+
+/* 触屏/无悬停设备：不能把复制入口藏在 hover 里 */
+@media (hover: none) {
+  .loc-ops,
+  .env-copy {
+    opacity: 1;
+  }
+}
+
 .versions-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -383,6 +1071,10 @@ async function refresh() {
 
 @media (max-width: 900px) {
   .versions-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .loc-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -441,8 +1133,8 @@ async function refresh() {
 }
 
 .v-row {
-  height: 40px;
-  padding: 0 10px;
+  min-height: 46px;
+  padding: 6px 10px;
   border-radius: var(--r-ctl);
   display: flex;
   align-items: center;
@@ -450,6 +1142,48 @@ async function refresh() {
   font-size: 12.5px;
   border: 1px solid transparent;
   transition: all 0.12s var(--ease);
+}
+
+/* 版本行改成两行：上排版本/来源/占用，下排安装路径（可点击复制） */
+.v-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.v-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.v-path {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 10.5px;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.14s var(--ease);
+}
+
+.v-path span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.v-path:hover {
+  color: var(--accent-ink);
 }
 
 .v-row:hover {
@@ -497,41 +1231,76 @@ async function refresh() {
 .action-col {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   margin-left: 8px;
 }
 
-.icon-only {
-  width: 26px;
+/* 行内图标按钮：24×24 正方形（旧版是 26×24 的扁框，图标在框里不居中），
+   常态无框无底 —— 版本行右侧只剩一片安静的图标，hover 才浮出 danger 底。 */
+.icon-btn {
+  width: 24px;
+  height: 24px;
+  flex: none;
   padding: 0;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-ctl);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-3);
+  transition: color 0.16s var(--ease), background-color 0.16s var(--ease),
+    border-color 0.16s var(--ease), transform 0.16s var(--ease), opacity 0.16s ease;
+}
+
+/* 生效行没有「切换」按钮当邻居，卸载是唯一动作，常态提一档别看着像禁用 */
+.icon-btn.is-ready {
+  color: var(--ink-2);
 }
 
 .danger-b {
   color: var(--danger);
-  border-color: var(--danger-line, rgba(242, 109, 109, 0.3));
+  background: var(--danger-bg);
+  border-color: var(--danger-line);
 }
 
 .danger-b:hover:not([disabled]) {
-  background: var(--danger-bg, rgba(242, 109, 109, 0.1));
-  border-color: var(--danger-line, rgba(242, 109, 109, 0.3));
+  background: var(--danger-bg);
+  border-color: var(--danger);
 }
 
-/* 卸载按钮：常态弱色，hover 转 danger；禁用（系统行/最后一个版本）保持灰且不变形 */
-.trash-btn {
-  color: var(--ink-3);
-}
-
-.trash-btn:hover:not([disabled]) {
+/* 卸载入口：常态只是行尾一枚弱色图标，hover 才浮出 danger 底并把图标提一档；
+   is-disabled（系统行 / 外部目录 / 最后一个版本）保持灰、不给 danger 反馈，
+   但按钮本身仍可点 —— 点了会 toast 出 disable 的原因（原生 disabled 不弹 title）。 */
+.trash-btn:not(.is-disabled):hover {
   color: var(--danger);
-  background: var(--danger-bg, rgba(242, 109, 109, 0.1));
-  border-color: var(--danger-line, rgba(242, 109, 109, 0.3));
+  background: var(--danger-bg);
+  border-color: var(--danger-line);
 }
 
-.trash-btn:disabled {
-  opacity: 0.45;
+.trash-btn:not(.is-disabled):hover .env-icon {
+  transform: translateY(-0.5px) scale(1.08);
+}
+
+.trash-btn:not(.is-disabled):active {
+  transform: scale(0.9);
+}
+
+.trash-btn:focus-visible {
+  border-color: var(--danger-line);
+  box-shadow: 0 0 0 2px var(--danger-bg);
+}
+
+.trash-btn.is-disabled {
+  opacity: 0.34;
   cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trash-btn:not(.is-disabled):hover .env-icon,
+  .trash-btn:not(.is-disabled):active {
+    transform: none;
+  }
 }
 
 .ro-tag {
@@ -544,7 +1313,7 @@ async function refresh() {
   font-size: 10px;
   font-weight: 700;
   padding: 1px 5px;
-  background: rgba(63, 191, 168, 0.16);
+  background: var(--accent-dim);
   color: var(--accent-ink);
   border-radius: 4px;
 }
@@ -594,5 +1363,217 @@ async function refresh() {
   height: 100%;
   background: var(--accent);
   transition: width 0.15s ease;
+}
+
+/* —— 安装确认弹层 —— */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(3px);
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-panel);
+  box-shadow: 0 16px 40px var(--pop-shadow);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.modal-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.modal-close {
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: var(--ink-3);
+  font-size: 14px;
+}
+
+.modal-close:hover:not([disabled]) {
+  background: var(--surface-raised);
+  color: var(--ink-1);
+}
+
+.modal-close[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  max-height: 68vh;
+  overflow-y: auto;
+}
+
+.it-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-ctl);
+}
+
+.it-label {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.it-path {
+  font-size: 12px;
+  color: var(--ink-1);
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.it-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--ink-3);
+}
+
+.move-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-ctl);
+}
+
+.mb-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.mb-path {
+  font-size: 11.5px;
+  color: var(--warn);
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.mb-note {
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+
+.move-prog {
+  padding: 9px 11px;
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-ctl);
+}
+
+.mp-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.mp-bar {
+  height: 5px;
+  background: var(--hairline-strong);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.mp-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.18s var(--ease);
+}
+
+.modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 13px 18px;
+  background: var(--surface-soft);
+  border-top: 1px solid var(--hairline);
+}
+
+.foot-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* —— 环境变量托管开关 —— */
+.toggle {
+  width: 34px;
+  height: 20px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline-strong);
+  cursor: pointer;
+  transition: background-color 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+
+.toggle.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.toggle-ball {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s var(--ease);
+}
+
+.toggle.on .toggle-ball {
+  transform: translateX(14px);
+}
+
+.managed-chip {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  color: var(--accent-ink);
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-line);
+  white-space: nowrap;
 }
 </style>

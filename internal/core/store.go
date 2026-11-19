@@ -16,7 +16,9 @@ import (
 // ListInstalls 汇总本机版本：store 自有 + 适配器声明的收编来源（如 nvm）。
 func ListInstalls(ad Adapter, s *settings.Settings) []Install {
 	out := scanStore(ad, s)
-	if ex, ok := ad.(interface{ Adopted(s *settings.Settings) []Install }); ok {
+	if ex, ok := ad.(interface {
+		Adopted(s *settings.Settings) []Install
+	}); ok {
 		out = append(out, ex.Adopted(s)...)
 	}
 	sortInstalls(out)
@@ -29,7 +31,9 @@ func ListInstallsFast(ad Adapter, s *settings.Settings) []Install {
 	out := scanStoreFast(ad, s)
 	if ex, ok := ad.(FastAdopter); ok {
 		out = append(out, ex.AdoptedFast(s)...)
-	} else if ex, ok := ad.(interface{ Adopted(s *settings.Settings) []Install }); ok {
+	} else if ex, ok := ad.(interface {
+		Adopted(s *settings.Settings) []Install
+	}); ok {
 		out = append(out, ex.Adopted(s)...)
 	}
 	sortInstalls(out)
@@ -40,7 +44,7 @@ func sortInstalls(out []Install) {
 	sort.Slice(out, func(i, j int) bool { return CompareVersions(out[i].Version, out[j].Version) > 0 })
 }
 
-func scanStore(ad Adapter, s *settings.Settings) []Install { return scanStoreN(ad, s, true) }
+func scanStore(ad Adapter, s *settings.Settings) []Install     { return scanStoreN(ad, s, true) }
 func scanStoreFast(ad Adapter, s *settings.Settings) []Install { return scanStoreN(ad, s, false) }
 
 func scanStoreN(ad Adapter, s *settings.Settings, withSize bool) []Install {
@@ -81,15 +85,21 @@ func CurrentInstall(ad Adapter, s *settings.Settings) (*Install, string, error) 
 		return nil, "", nil
 	}
 	ver := versionFromStorePath(ad, s, target)
+	// target 是 junction 指向的"进 PATH 的目录"：java/go/maven 这类 BinSub 非空的
+	// 工具，它本身已经是 <ver>\bin，不能再拼一次；只有老数据/外部链接才需要补。
 	bin := target
-	if ad.BinSub() != "" && strings.Contains(target, filepath.Join("store", ad.ID())) {
-		bin = filepath.Join(target, ad.BinSub())
+	if sub := strings.Trim(ad.BinSub(), `\/`); sub != "" {
+		suffix := string(filepath.Separator) + sub
+		if !strings.HasSuffix(strings.ToLower(target), strings.ToLower(suffix)) {
+			bin = filepath.Join(target, sub)
+		}
 	}
-	// nvm 收编目录：target 本身就是版本根（含 node.exe），不再拼 BinSub
+	// 归属判断必须按路径前缀，不能用 Contains：store 迁到 D://store 后，
+	// D://store-old//... 也会命中 Contains，被误判成 store 内部。
 	src := "store"
-	if !strings.Contains(strings.ToLower(target), strings.ToLower(settings.StoreDir(s))) {
+	if !isUnderPath(target, settings.StoreDir(s)) {
 		src = "external"
-		if root := NvmRoot(); root != "" && strings.HasPrefix(strings.ToLower(target), strings.ToLower(root)+`\`) {
+		if root := NvmRoot(); root != "" && isUnderPath(target, root) {
 			src = "nvm"
 		}
 	}

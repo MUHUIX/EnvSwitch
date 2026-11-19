@@ -13,13 +13,13 @@ import (
 	"github.com/MUHUIX/envswitch/internal/settings"
 )
 
-// 热更新：读 updates 分支 latest.json → 下载 zip → sha256 校验 →
-// 旧 exe 改名 .old → 新文件就位 → 调用方带 --updated 重启 → 新进程 heartbeat 后清 .old。
+// 热更新：读 updates 分支 latest.json → 下载 zip → sha256 校验 → 解包暂存 →
+// 旧 exe 让位 .old → 新文件就位 → 调用方带 --updated 重启 → 新进程 heartbeat 后清 .old。
 // 安全边界：仅 HTTPS + sha256；不删 .old 前任何一步都可回滚。
 
 const (
-	defaultRepo    = "MUHUIX/EnvSwitch"
-	defaultRawHost = "https://raw.githubusercontent.com"
+	defaultRepo     = "MUHUIX/EnvSwitch"
+	defaultRawHost  = "https://raw.githubusercontent.com"
 	updateHeartbeat = "update\\heartbeat"
 	updateOldSuffix = ".old"
 )
@@ -72,13 +72,22 @@ func CheckUpdate(ctx context.Context, proxy, current string) (*UpdateManifest, *
 // SelfUpdate 更新包的下载/应用/回滚编排（home 取 settings.Home()，支持 ENVS_HOME 隔离）。
 type SelfUpdate struct {
 	s *settings.Settings
+	// OnStage 汇报「下载百分比之外」的阶段（解包/替换），供 GUI 画进度；可为 nil。
+	OnStage func(stage, msg string)
 }
 
 func NewSelfUpdate(s *settings.Settings) *SelfUpdate { return &SelfUpdate{s: s} }
 
 func (u *SelfUpdate) homeDir() string { return settings.Home() }
 
-// Download 拉更新包并校验（不应用）。返回解出的文件 map 名→临时路径。
+// stage 是 OnStage 的静默包装：CLI 与测试不关心阶段，传 nil 即可。
+func (u *SelfUpdate) stage(name, msg string) {
+	if u.OnStage != nil {
+		u.OnStage(name, msg)
+	}
+}
+
+// Download 拉更新包、校验并解包（不应用）。返回解出的文件 map 名→临时路径。
 func (u *SelfUpdate) Download(ctx context.Context, asset *UpdateAssetEntry, progress Progress) (map[string]string, error) {
 	dst := filepath.Join(u.homeDir(), "update", "package.zip")
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -89,6 +98,7 @@ func (u *SelfUpdate) Download(ctx context.Context, asset *UpdateAssetEntry, prog
 		return nil, err
 	}
 	outDir := filepath.Join(u.homeDir(), "update", "staged")
+	u.stage("unpack", "校验通过，正在解包…")
 	os.RemoveAll(outDir)
 	if err := Unpack(dst, outDir); err != nil {
 		return nil, err
@@ -117,6 +127,7 @@ func (u *SelfUpdate) Apply(files map[string]string, exePath string) error {
 	dir := filepath.Dir(exePath)
 	old := exePath + updateOldSuffix
 	os.Remove(old)
+	u.stage("apply", "正在替换程序文件…")
 	// 运行中 exe 不能覆写但可以改名
 	if err := os.Rename(exePath, old); err != nil {
 		return fmt.Errorf("让位旧版本失败: %w", err)
@@ -143,8 +154,8 @@ func siblingName(base string) string {
 // 同卷优先 os.Rename（原子、零拷贝）；跨卷时 Go 在 Windows 走 MoveFileEx 且不带
 // MOVEFILE_COPY_ALLOWED，会直接报 ERROR_NOT_SAME_DEVICE（更新包暂存在 C:\ 的
 // %LOCALAPPDATA%，程序却可能装在别的盘），因此退化为「复制到 dst 同目录临时文件
-// → 删 dst → 换名就位」。临时文件与 dst 同卷，末次 rename 必然成功；中途任何一步
-// 失败都只留下 .incoming，不会留半个可执行文件在原位。
+// → 核对大小 → 删 dst → 换名就位」。临时文件与 dst 同卷，末次 rename 必然成功；
+// 中途任何一步失败都只留下 .incoming，不会留半个可执行文件在原位。
 func moveOver(src, dst string) error {
 	if err := os.Rename(src, dst); err == nil {
 		return nil
@@ -153,15 +164,21 @@ func moveOver(src, dst string) error {
 	os.Remove(tmp)
 	if err := copyFile(src, tmp); err != nil {
 		os.Remove(tmp)
-		return err
+		return fmt.Errorf("跨卷复制失败: %w", err)
+	}
+	ss, err1 := os.Stat(src)
+	ts, err2 := os.Stat(tmp)
+	if err1 != nil || err2 != nil || ss.Size() != ts.Size() {
+		os.Remove(tmp)
+		return errors.New("复制结果大小与源不符，已放弃替换")
 	}
 	if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
 		os.Remove(tmp)
-		return err
+		return fmt.Errorf("清理原位文件失败: %w", err)
 	}
 	if err := os.Rename(tmp, dst); err != nil {
 		os.Remove(tmp)
-		return err
+		return fmt.Errorf("换名就位失败: %w", err)
 	}
 	os.Remove(src) // 清掉跨卷复制留下的暂存原件
 	return nil
@@ -190,7 +207,7 @@ func copyFile(src, dst string) error {
 	return clErr
 }
 
-// WriteHeartbeat / MarkUpdateGood / SweepOld —— 启动侧三段式：
+// WriteHeartbeat / MarkGood / RollbackPending —— 启动侧三段式：
 // 新进程启动即 heartbeat；存活 5s 判成功清 .old；启动时若见残留 .old 且无 heartbeat，回滚。
 
 func (u *SelfUpdate) WriteHeartbeat() error {
@@ -214,9 +231,8 @@ func (u *SelfUpdate) MarkGood() {
 	os.Remove(filepath.Join(u.homeDir(), updateHeartbeat))
 }
 
-// RollbackIfNeeded 启动最早调用：.old 存在且本次 heartbeat 已写但版本仍启动失败的外部表现
-// 无法在本进程内自证，因此语义收敛为——存在 .old 且 heartbeat 新鲜 = 刚完成更新启动成功，删 .old；
-// 存在 .old 且 heartbeat 缺失且距上次更新 <24h = 崩溃回滚窗口，交调用方决定（GUI 启动 5s 定时器调用）。
+// RollbackPending 启动最早调用：存在 .old 且 heartbeat 新鲜 = 刚完成更新启动成功；
+// 存在 .old 且 heartbeat 缺失 = 崩溃回滚窗口，交调用方决定（GUI 启动 5s 定时器调用）。
 func (u *SelfUpdate) RollbackPending(exePath string) bool {
 	old := exePath + updateOldSuffix
 	if _, err := os.Stat(old); err != nil {

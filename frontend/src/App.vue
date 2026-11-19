@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, provide, onMounted, onUnmounted } from 'vue'
 import { api, on } from './bridge'
+import { sortTools } from './sort'
 import Icon from './components/Icon.vue'
 import TitleBar from './components/TitleBar.vue'
 import Overview from './views/Overview.vue'
@@ -8,7 +9,14 @@ import ToolDetail from './views/ToolDetail.vue'
 import SettingsView from './views/Settings.vue'
 import NetProxyView from './views/NetProxy.vue'
 
-const view = ref({ name: 'overview', tool: null })
+// dev/QC：浏览器直开（无外壳）时支持 #settings、#netproxy 直达页签，方便不点击就能截图核对。
+const KNOWN_VIEWS = ['overview', 'settings', 'netproxy']
+function initialView () {
+  const h = String(location.hash || '').replace(/^#/, '')
+  return KNOWN_VIEWS.includes(h) ? { name: h, tool: null } : { name: 'overview', tool: null }
+}
+
+const view = ref(initialView())
 const tools = ref([])
 const toasts = ref([])
 const collapsed = ref(localStorage.getItem('envswitch-rail') === 'collapsed')
@@ -109,7 +117,7 @@ let offInstall = () => {}
 onMounted(async () => {
   applyTheme(isDark.value)
   try {
-    tools.value = await api.overview()
+    tools.value = sortTools(await api.overview())
     const s = await api.settings()
     ver.value = s?.version || 'v1.0.0'
     const pending = await api.pendingUpdate()
@@ -123,8 +131,15 @@ onMounted(async () => {
   offUpdate = on('update', (u) => {
     hasUpdate.value = !!u?.available
   })
-  offStatus = on('status', (list) => { tools.value = list })
+  offStatus = on('status', (list) => { tools.value = sortTools(list) })
   offInstall = on('install', (p) => {
+    // 自更新的进度与结果由设置页的更新卡片承载，这里只兜住跨页面的失败与重启提示
+    if (p.tool === 'self') {
+      // 设置页的更新卡片自带进度与失败详情，只有停在别的页面时才需要 toast 兜底
+      if (p.stage === 'error' && view.value.name !== 'settings') toast(`EnvSwitch 更新失败\n${p.message}`, 'err')
+      if (p.stage === 'done') toast(`EnvSwitch 已更新到 ${p.version}，正在重启…`)
+      return
+    }
     if (p.stage === 'error') toast(`${p.tool} ${p.version} 失败\n${p.message}`, 'err')
     if (p.stage === 'done') toast(`${p.tool} ${p.version} 安装激活完成`)
     if (p.stage === 'cancelled') toast(`${p.tool} ${p.version} 已取消`)
@@ -144,9 +159,7 @@ onUnmounted(() => {
     <TitleBar
       :ver="ver"
       :is-dark="isDark"
-      :has-update="hasUpdate"
       @toggle-theme="toggleTheme"
-      @open-settings="goto('settings')"
     />
 
     <div class="shell">

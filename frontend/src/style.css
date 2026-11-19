@@ -17,12 +17,14 @@
   --ink-2: #9BA3AC;
   --ink-3: #626C76;
 
-  --accent: #3FBFA8;
-  --accent-ink: #A8E6DA;
-  --accent-dim: rgba(63, 191, 168, 0.12);
-  --accent-line: rgba(63, 191, 168, 0.35);
+  /* 主题色：荧光绿（暗色直接用高饱和荧光 #39FF14，配双灯珠 glow 自带发光感；
+     文字前景用降饱和半档的 #6EFF5C，保证 12px 小字在深底上过 AA） */
+  --accent: #39FF14;
+  --accent-ink: #6EFF5C;
+  --accent-dim: rgba(57, 255, 20, 0.12);
+  --accent-line: rgba(57, 255, 20, 0.35);
 
-  --ok: #3FBFA8;
+  --ok: #39FF14;
   --warn: #E5B454;
   --danger: #F26D6D;
   --info: #6BB1FF;
@@ -60,7 +62,7 @@
   --shadow-card: 0 3px 10px rgba(0, 0, 0, 0.16);
   --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.28), 0 0 1px var(--accent-line);
   --shadow-btn: 0 1px 3px rgba(0, 0, 0, 0.12);
-  --shadow-glow: 0 0 14px rgba(63, 191, 168, 0.2);
+  --shadow-glow: 0 0 14px rgba(57, 255, 20, 0.2);
 }
 
 /* ===== 明亮模式 =====
@@ -85,17 +87,19 @@
   --ink-2: #3A4654;
   --ink-3: #5A6672;
 
-  /* 强调色：图形/描边用 --accent，落到文字必须用更深的 --accent-ink（8.6:1） */
-  --accent: #0E9F85;
-  --accent-ink: #04564A;
-  --accent-dim: rgba(14, 159, 133, 0.1);
-  --accent-line: rgba(14, 159, 133, 0.32);
+  /* 强调色：图形/描边用 --accent，落到文字必须用更深的 --accent-ink。
+     荧光绿原色 #39FF14 在白底只有 1.5:1 不可用，按同色相（高饱和黄绿→纯绿）
+     压深：--accent #0C8A1E（白字 4.5:1）、--accent-ink #0A5C16（对白底约 7:1）。 */
+  --accent: #0C8A1E;
+  --accent-ink: #0A5C16;
+  --accent-dim: rgba(12, 138, 30, 0.1);
+  --accent-line: rgba(12, 138, 30, 0.32);
 
-  /* 状态色：亮底一律压深。--ok 由 #0E9F85（3.3:1）压到 #0B8470（4.6:1），
+  /* 状态色：亮底一律压深。--ok 用荧光绿同族压深 #0A7A1B（对白底约 5:1），
      这样同事在正文里写 color: var(--ok) 的小字也能读。
      --warn 用 #8A5C00（#9A6700 同族压暗一档）：#9A6700 在白面板上是 4.87:1 过关，
      但落到 --warn-bg 底纹上只剩 4.29:1，再深一档后白底 5.8:1、底纹上 5.1:1 都稳。 */
-  --ok: #0B8470;
+  --ok: #0A7A1B;
   --warn: #8A5C00;
   --danger: #C22B2B;
   --info: #1B6AC9;
@@ -115,7 +119,7 @@
   --shadow-card: 0 2px 8px rgba(11, 16, 23, 0.06);
   --shadow-card-hover: 0 6px 18px rgba(11, 16, 23, 0.12), 0 0 1px var(--accent-line);
   --shadow-btn: 0 1px 2px rgba(11, 16, 23, 0.06);
-  --shadow-glow: 0 0 10px rgba(14, 159, 133, 0.15);
+  --shadow-glow: 0 0 10px rgba(12, 138, 30, 0.15);
 }
 
 * {
@@ -258,9 +262,9 @@ input {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  /* 暗色主题的青绿按钮是浅底（#3FBFA8 亮度≈0.40），白字只有 2.3:1；
-     换成深墨文字后约 8:1。明亮主题在下方覆盖回白字（压深青底 #0A7A68）。 */
-  color: #08161C;
+  /* 暗色主题的荧光绿按钮是浅底（#39FF14 亮度很高），白字撑不住；
+     换成深墨文字后对比充足。明亮主题在下方覆盖回白字（压深绿底 #0A6B18）。 */
+  color: #04120A;
   font-weight: 600;
   box-shadow: 0 2px 8px var(--accent-dim), var(--shadow-glow);
 }
@@ -315,7 +319,7 @@ input {
 .lamp.ok {
   --lamp-c: var(--ok);
   background: var(--ok);
-  box-shadow: 0 0 8px var(--ok), 0 0 12px rgba(63, 191, 168, 0.4);
+  box-shadow: 0 0 8px var(--ok), 0 0 12px rgba(57, 255, 20, 0.4);
   animation: lamp-breathe 3.2s ease-in-out infinite;
 }
 
@@ -412,11 +416,11 @@ input {
    下面这些值只在白底成立：暗色那套大光晕 / 半透明直接搬过来会发灰发脏。
    用 [data-theme="light"] 前缀单独覆盖，暗色的表现一个字节都没动。 */
 
-/* 主按钮：白字压在 --accent(#0E9F85) 上只有 3.3:1，12.5px 撑不住；
-   换成同族深青 #0A7A68 → 白字 5.3:1（悬停只提 1.06 倍亮度，不掉出 AA）。 */
+/* 主按钮：白字压在 --accent(#0C8A1E) 上只有 4.5:1，12.5px 小字贴边；
+   换成同族深绿 #0A6B18 → 白字约 5.9:1（悬停只提 1.06 倍亮度，不掉出 AA）。 */
 [data-theme="light"] .btn.primary {
-  background: #0A7A68;
-  border-color: #0A7A68;
+  background: #0A6B18;
+  border-color: #0A6B18;
   color: #FFFFFF;
 }
 
@@ -427,7 +431,7 @@ input {
 
 /* 灯点光晕：暗色是"自发光"思路的双层大 glow，白底上收成紧贴点的一层深色微光。 */
 [data-theme="light"] .lamp.ok {
-  box-shadow: 0 0 6px rgba(11, 132, 112, 0.45);
+  box-shadow: 0 0 6px rgba(10, 122, 27, 0.45);
 }
 
 [data-theme="light"] .lamp.up {

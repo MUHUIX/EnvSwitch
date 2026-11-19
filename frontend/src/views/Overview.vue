@@ -1,6 +1,7 @@
 <script setup>
 import { ref, inject, computed, onMounted, onUnmounted } from 'vue'
 import { api, on } from '../bridge'
+import { sortTools } from '../sort'
 import Icon from '../components/Icon.vue'
 
 const emit = defineEmits(['open-tool'])
@@ -38,7 +39,7 @@ async function pollOverview() {
   try {
     const list = await api.overview()
     if (list && list.length) {
-      tools.value = list
+      tools.value = sortTools(list)
     }
   } catch (e) {
     // 降级保护
@@ -51,7 +52,7 @@ async function manualRefresh() {
   try {
     // 强制清缓存复检：否则 60 秒内的探测结果会被直接复用，按钮等于没点
     const list = await api.refreshEnv()
-    if (list && list.length) tools.value = list
+    if (list && list.length) tools.value = sortTools(list)
     doctors.value = (await api.doctor()) || []
   } finally {
     setTimeout(() => {
@@ -132,7 +133,7 @@ async function pick(ver) {
     await api.use(t, ver)
     flip.value = t
     setTimeout(() => { flip.value = '' }, 320)
-    tools.value = await api.overview()
+    tools.value = sortTools(await api.overview())
     toast(`已成功切换 ${t} 至 ${ver}`)
   } catch (e) {
     toast(String(e), 'err')

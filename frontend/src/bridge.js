@@ -46,7 +46,77 @@ let demoNetProxy = {
   ]
 }
 
+// dev 模式（浏览器直开、无 wails 运行时）的自更新演示：清单给一份真实形态的
+// Markdown 说明，ApplyUpdate 按 core 的 stage/pct 契约推一遍进度，方便不打包调 UI。
+const demoUpdate = {
+  available: true,
+  version: 'v1.3.1',
+  size: '8.9 MB',
+  error: '',
+  notes: [
+    '# EnvSwitch v1.3.0',
+    '',
+    '这版能把 nvm 收编进来的版本也直接卸载了，修掉热更新跨盘失败、明亮主题重做了一遍。',
+    '',
+    '## 新增：卸载 nvm 收编的版本',
+    '',
+    '- 卸载按钮不再只对「版本库」里的版本开放：nvm 收编进来的版本同样可卸载；系统 PATH 探测到的行仍是只读。',
+    '- 真删目录前有一整套安全托底：目录必须真实存在且是目录、必须严格位于 nvm 根目录第一层、本身不能是 junction。',
+    '- 卸载当前生效版本会自动摘掉激活链接并切到剩余最新版本；只剩最后一个可卸载版本时按钮禁用。',
+    '- 版本写法托底：`v22.22.0` 这类带前缀的写法先归一化再找版本库。',
+    '',
+    '## 问题修复',
+    '',
+    '- **热更新报「放置新版本失败」**：更新包暂存在 C:\\ 而程序装在别的盘时，`os.Rename` 直接报 ERROR_NOT_SAME_DEVICE。',
+    '- **热更新后新版本起不来**：旧进程只是隐藏不退，新进程拿不到单实例锁。',
+    '- **托盘退出一次后，点 × 变成直接关程序**：旧实现把 closeToTray=false 写进了设置文件。',
+    '- **卸载后版本还赖在列表里**：删完目录没清系统环境探测缓存。',
+    '',
+    '## 下载',
+    '',
+    '| 文件 | 用途 |',
+    '| --- | --- |',
+    '| `EnvSwitch-Setup-v1.3.0.exe` | 安装版 |',
+    '',
+    '已有 v1.x 可直接在设置页「软件更新」里热更新。'
+  ].join('\n')
+}
+
+function simulateUpdate (step) {
+  const steps = [
+    { stage: 'download', pct: 0, message: '开始下载更新包' },
+    { stage: 'download', pct: 26, speed: '3.4 MB/s', message: '正在下载更新包 2.3 MB / 8.9 MB' },
+    { stage: 'download', pct: 61, speed: '4.1 MB/s', message: '正在下载更新包 6.3 MB / 8.9 MB' },
+    { stage: 'download', pct: 85, speed: '3.8 MB/s', message: '正在下载更新包 8.9 MB / 8.9 MB' },
+    { stage: 'unpack', pct: 90, message: '校验通过，正在解包…' },
+    { stage: 'apply', pct: 96, message: '正在替换程序文件…' },
+    { stage: 'restart', pct: 98, message: '替换完成，正在重启…' },
+    { stage: 'done', pct: 100, message: '更新完成，正在重启 EnvSwitch…' }
+  ]
+  if (step != null && steps[step]) {
+    setTimeout(() => devEmit('install', { tool: 'self', version: 'v1.3.1', speed: '', ...steps[step] }), 120)
+    return
+  }
+  steps.forEach((s, i) => setTimeout(() => devEmit('install', { tool: 'self', version: 'v1.3.1', speed: '', ...s }), 320 * (i + 1)))
+}
+
 function demo (method, args) {
+  if (method === 'ApplyUpdate') { simulateUpdate(); return null }
+  if (method === 'PendingUpdate' || method === 'CheckUpdateNow') {
+    // ?apply=1 自动走一遍进度；?apply=1&step=N 只推第 N 步，便于定格截图
+    const q = new URLSearchParams(location.search)
+    if (method === 'PendingUpdate' && q.get('apply') === '1') {
+      if (q.get('step') === 'err') {
+        setTimeout(() => devEmit('install', {
+          tool: 'self', stage: 'error', version: 'v1.3.1', pct: 0,
+          message: '放置新版本失败: rename C:\\Users\\me\\AppData\\Local\\EnvSwitch\\update\\staged\\EnvSwitch.exe E:\\EnvSwitch\\EnvSwitch.exe: 系统无法将文件移到不同的磁盘驱动器。'
+        }), 120)
+      } else {
+        simulateUpdate(q.has('step') ? Number(q.get('step')) : null)
+      }
+    }
+    return JSON.parse(JSON.stringify(demoUpdate))
+  }
   if (method === 'NetProxyList') return JSON.parse(JSON.stringify(demoNetProxy))
   if (method === 'NetProxySave') {
     const draft = args[0] || {}
@@ -152,9 +222,50 @@ function demo (method, args) {
   }
   if (method === 'Local') return []
   if (method === 'Remote') return []
+  if (method === 'Location') {
+    const tool = args[0] || 'node'
+    const root = 'C:\\Users\\demo\\AppData\\Local\\EnvSwitch'
+    return {
+      home: root,
+      storeDir: root + '\\store',
+      storeDefault: root + '\\store',
+      storeCustom: false,
+      toolStoreDir: root + '\\store\\' + tool,
+      versionHint: root + '\\store\\' + tool + '\\<版本号>',
+      binSub: '',
+      currentLink: root + '\\current\\' + tool,
+      currentTarget: root + '\\store\\' + tool + '\\22.22.0',
+      currentOk: true,
+      pathEntries: [{
+        path: root + '\\current\\' + tool,
+        role: '激活链接',
+        present: true,
+        exists: true,
+        note: '首次切换会自动写入用户 PATH'
+      }],
+      envVars: tool === 'java'
+        ? [{
+            key: 'JAVA_HOME',
+            value: 'C:\\Program Files\\Java\\jdk-17',
+            set: true,
+            note: 'JDK 根目录（Maven/Gradle 依赖） · 外部安装目录',
+            managed: false,
+            manageKey: 'JAVA_HOME',
+            manageTool: 'java',
+            target: root + '\\store\\java\\17.0.9'
+          }]
+        : [],
+      shimsDir: root + '\\bin\\shims',
+      shims: [],
+      exeDir: 'C:\\Program Files\\EnvSwitch'
+    }
+  }
   if (method === 'Doctor') return []
   if (method === 'RefreshEnv') return demo('Overview', args)
-  if (method === 'Settings') return { autostart: false, closeToTray: true, autoCheckUpdate: true, checkUpdateOnStart: true, storePath: '(dev)', mirrors: {}, proxy: '', indexCacheMinutes: 10, version: 'dev', remoteState: {}, totalSize: '—' }
+  if (method === 'Settings') return { autostart: false, closeToTray: true, autoCheckUpdate: true, checkUpdateOnStart: true, storePath: '(dev)', mirrors: {}, proxy: '', indexCacheMinutes: 10, version: 'dev', remoteState: {}, totalSize: '—', installedCount: 0, managedEnv: [] }
+  if (method === 'PickDirectory') return ''
+  if (method === 'ChangeStore') return null
+  if (method === 'SetEnvManaged') return null
   return null
 }
 
@@ -163,6 +274,7 @@ export const api = {
   refreshEnv: () => call('RefreshEnv'),
   local: (t) => call('Local', t),
   remote: (t) => call('Remote', t),
+  location: (t) => call('Location', t),
   doctor: () => call('Doctor'),
   settings: () => call('Settings'),
   use: (t, v) => call('Use', t, v),
@@ -173,6 +285,10 @@ export const api = {
   setField: (k, v) => call('SetField', k, String(v)),
   refreshIndex: (t) => call('RefreshIndex', t),
   openStoreDir: () => call('OpenStoreDir'),
+  openDir: (p) => call('OpenDir', p),
+  changeStore: (p) => call('ChangeStore', p),
+  pickDirectory: (title, dir) => call('PickDirectory', title, dir),
+  setEnvManaged: (k, on) => call('SetEnvManaged', k, !!on),
   pendingUpdate: () => call('PendingUpdate'),
   checkUpdateNow: () => call('CheckUpdateNow'),
   applyUpdate: () => call('ApplyUpdate'),
@@ -185,18 +301,36 @@ export const api = {
   netproxyClashSync: () => call('NetProxyClashSync')
 }
 
-// wails 事件桥（dev 模式无 window.runtime 时空实现）
+// wails 事件桥：浏览器 dev 模式没有 window.runtime，改用本模块的事件表，
+// 让 demo 的模拟推送（自更新进度等）能驱动界面，不打包也能调 UI。
+const devChannels = new Map()
+function devEmit (name, payload) {
+  const set = devChannels.get(name)
+  if (set) set.forEach(cb => cb(payload))
+}
 export function on (name, cb) {
   if (window.runtime && window.runtime.EventsOn) return window.runtime.EventsOn(name, cb)
-  return () => {}
+  if (!devChannels.has(name)) devChannels.set(name, new Set())
+  devChannels.get(name).add(cb)
+  return () => {
+    const set = devChannels.get(name)
+    if (set) set.delete(cb)
+  }
 }
 
 // 窗口操作：frameless 模式下由 TitleBar 调用；浏览器 dev 模式静默降级
 const rt = () => window.runtime
+const goApi = () => (window.go && window.go.app && window.go.app.App) || null
 export const win = {
   minimise () { rt()?.WindowMinimise() },
   toggleMaximise () { rt()?.WindowToggleMaximise() },
-  close () { rt()?.WindowClose() },
+  // wails 前端 runtime 没有 WindowClose（调了会静默无效），
+  // 关闭走后端 App.CloseWindow：closeToTray 开→隐入托盘，关→真退
+  close () {
+    const b = goApi()
+    if (b?.CloseWindow) { b.CloseWindow(); return }
+    rt()?.WindowHide() // 浏览器 dev 模式无后端：退化为隐藏
+  },
   isMaximised () {
     const r = rt()
     if (!r?.WindowIsMaximised) return Promise.resolve(false)
