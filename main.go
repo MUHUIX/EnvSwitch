@@ -63,8 +63,13 @@ func main() {
 		func() { showMainWindow(a) })
 	tray.WaitReady()
 
-	go runWindow(a, *startTrayOnly)
-	select {}
+	// wails.Run 必须跑在主 goroutine：Windows 消息泵与 WebView2 COM 回调依赖 OS 线程
+	// 亲和性（main 已被 user32 包 init 的 LockOSThread 钉死）。放普通 goroutine 会被
+	// 调度器在启动中途迁移到其他线程，COM 回调投进被废弃的线程队列，DomReady 永不触发、
+	// 窗口永久隐藏——约 1/6 概率间歇复现。
+	runWindow(a, *startTrayOnly)
+	// 事件循环结束（用户退出/致命错误）即终结进程，托盘线程随之退出
+	os.Exit(0)
 }
 
 func mustSettings() *settings.Settings {
