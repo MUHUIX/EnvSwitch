@@ -63,6 +63,8 @@ Node.js（OpenJS Foundation）、npm / npx（npm, Inc.）、pnpm、Yarn（Meta�
 
 上述列举用于说明互不隶属的事实，不构成对任何商标权的主张。
 
+界面中上述品牌的矢量字形取自 [Simple Icons](https://simpleicons.org/)（CC0-1.0），仅按各品牌官方图形与官方品牌色还原标识，不代表获得商标授权。
+
 ## 核验完整清单
 
 第三方依赖以 `go.mod` / `go.sum` 与 `frontend/package.json` 为唯一事实来源；上表为人工整理，可能与上游更新不同步，一律以上游仓库的 `LICENSE` 为准。需要完整清单时：

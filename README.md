@@ -100,6 +100,47 @@ envs self update|rollback       自更新或回滚到上一版
 
 `status`、`list`（本机分支）、`doctor`、`config show`、`version` 支持 `--json`，方便脚本调用。退出码：0 成功 / 1 失败或未找到 / 2 参数用法错 / 3 网络 / 4 校验失败 / 5 权限。
 
+## 按目录指定版本（目录绑定）
+
+给某个项目目录固定用哪个版本，进目录就自动对版。总开关**默认关闭**，要自己开一次：`envs bind enable`（§4.1）。数据只有一个文件 —— `%LOCALAPPDATA%\EnvSwitch\bindings.json`，不与 `settings.json` 混写（§4.5）。
+
+```powershell
+envs bind node 16 --cwd D:\work\proj-a --note "webpack 4，必须 16"   # 绑一个目录（默认只写表）
+envs init powershell --append        # 装会话钩子；去掉 --append 只预览，不动你的 $PROFILE
+envs run -- npm run dev              # 不装钩子时的显式托底
+envs bind why                        # 这个目录的版本是怎么定下来的
+```
+
+### 生效面分四档，不是「一个开关全自动」（§0 Q2）
+
+| 档 | 场景 | 结论 |
+|---|---|---|
+| 全自动 | PowerShell 5.1 / 7、Git Bash（含 VSCode 内置终端）里直接敲 `node` / `npm` / `python` / `go` | ✅ 靠会话钩子，进目录生效、离开自动撤销 |
+| 半自动 | cmd.exe | ⚠️ 只在**新开的窗口**生效；已开窗口不会变（cmd 没有 cd 事件，AutoRun 只覆盖窗口起始目录，§6.1） |
+| 显式 | 任意终端、IDE 的外部命令、任务计划程序 | ✅ `envs run -- <命令>` / `envs shell`，一次前缀，可靠（§6.3） |
+| 结构性做不到 | WSL、devcontainer、容器、JetBrains 的 Run Configuration 解释器、PyCharm / GoLand SDK、HBuilderX 运行按钮、任何用绝对路径起进程的 GUI | ❌ 只有「从绑定目录启动 IDE」和「复制解释器绝对路径」两条辅助路（§6.4）。WSL 请当作另一台机器（§8） |
+
+### 必须知道的边界（都实测过）
+
+- **已打开的终端不会变化**：要么新开终端，要么用 `envs run` / `envs shell`。这是 Windows 环境块机制，不是故障（§7.2）。
+- **`npm run` 会把 `<项目>\node_modules\.bin` 顶到 PATH 首位**，所以 npm scripts 里直接写的 `node` 不经过 EnvSwitch 的 shim（层 2 覆盖不到这一格）。会话注入与 `envs run` 保证的是 `npm` 自身来自绑定目录；要锁 scripts 里的 node，就在 script 里写绝对路径，或整体走 `envs run -- npm run x`（§8 复测）。
+- **层 2（`bin\shims`）只是兜底**：机器上有系统级 node 时它会被抢位；而且为控成本只认绑定表**前 12 行**、目录祖先链**只上溯 8 级**，超出的一律靠层 1 钩子或 `envs run`（§6.2）。
+- **`node_modules` 里的 `.nvmrc` 不作数**（硬跳过）；`package.json` 的 `engines.node`（例如 `>=8.9`）是**约束不是 pin**，任何模式下都不会自动生效（§1 裁决 6）。默认只提示、不改动，要固定请显式 `envs bind`。
+- **上游自己会按项目选版本的，EnvSwitch 让位不注入**：dotnet 的 `global.json`、go 的 `go.mod` + `GOTOOLCHAIN`、`packageManager` + corepack、python 的 venv / `.python-version`(uv)、`gradlew` / `mvnw`。检测到就不注入对应工具，`envs bind why` 会说清原因；绑定 go 时会自动带上 `GOTOOLCHAIN=local`，否则 go 会自己去下工具链、绑定等于没绑（§5 档③）。
+- 绑定的版本没装 → **不会自动下载**，本次用全局版本并给一条 warn 与补装命令（§10）。
+- 网络盘 / UNC 路径不允许绑定；`bindings.json` 损坏时自动改名成 `bindings.bad-<时间戳>` 并整体回退全局，不弹错误框（§10）。
+- `pip`、`nvm-windows`、`docker` 不能绑定（版本不归 EnvSwitch 所有，或在 daemon 里，绑了只会误导）；`java` / `maven` / `gradle` 需要连 `JAVA_HOME` 一起注入，排在后续版本（§5 档②⑤）。首期开放的只有 node / npm / npx / pnpm / pnpx / yarn / python / go（§5 档①）。
+- 全局安装（`npm i -g`）的落点不受绑定影响。口径是：**绑定管运行，`envs run` 管其余一切**（§10）。
+
+### 开关、逃生门与回滚（§11）
+
+- `envs bind enable` / `envs bind disable --rewrite`：总开关；`--rewrite` 会同步重生成钩子读的那张表。
+- `ENVS_DISABLE=1`：进程级逃生门，设了这个变量的整棵进程树立刻回到全局版本。
+- `envs init --remove powershell|bash|cmd|*`：精确删掉自己写入的那一段（BEGIN/END 标记定位，你 profile 里原有的内容一个字不动）。回滚半径只等于本功能的增量 —— **PATH、用户级环境变量、junction 一概不碰**。
+- 目录改名 / 挪盘 / 外接盘没挂：命令照跑（用全局），表里的值保留，修好路径即恢复；`envs doctor` 会把它标出来（§10）。
+
+> **已知技术债（与本功能无关，留作独立待办）**：GUI 启动时把 `settings.json` 读进内存常驻，CLI 则是每次现读现写。GUI 开着时用 CLI 改配置，GUI 下次保存会把内存里的旧副本整体写回，CLI 的改动会丢失。目录绑定正是因为这一点才单独放 `bindings.json`，不受影响；`settings.json` 本身的撕裂尚未修（§4.5）。
+
 ## 桌面端
 
 GUI 基于 Wails v2 + Vue 3，窗口自绘标题栏，关闭默认缩到托盘（可在设置里改成退出）。托盘右键菜单按工具列出已装版本，点一下就切，不用开主界面。开机自启走 HKCU Run，同样不需要管理员权限。

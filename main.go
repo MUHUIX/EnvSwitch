@@ -1,12 +1,14 @@
 // main.go —— EnvSwitch GUI 入口。窗口与托盘是两个独立线程环：
 // wails 管渲染与绑定，托盘原生实现管动态快捷菜单。--tray 静默启动（开机自启）。
-// 启动顺序固定：崩溃回滚检查 → heartbeat 写入 → 托盘 → wails 窗口。
+// 启动顺序固定：单实例锁 → 崩溃回滚检查 → heartbeat 写入 → 托盘 → wails 窗口。
+// 锁在最前：只有独占本进程之后，才允许动 exe / .old / heartbeat。
 package main
 
 import (
 	"context"
 	"embed"
 	"flag"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,18 +45,35 @@ const (
 	maxPerTool           = 40
 )
 
+// 单实例互斥量名与重启侧的等锁上限。15s 足够覆盖旧进程收尾（消息泵退出 + 托盘线程
+// 拆除 + 内核释放句柄通常在 2s 内）；再久就是旧进程真卡死了，继续等不如留现场报错。
+const (
+	instanceName = "EnvSwitch.SingleInstance"
+	relaunchWait = 15 * time.Second
+)
+
 func main() {
 	startTrayOnly := flag.Bool("tray", false, "静默启动到托盘（开机自启用）")
 	updated := flag.Bool("updated", false, "内部参数：热更新后的首次启动")
+	waitInstance := flag.Bool("wait-instance", false, "内部参数：等上一个实例退场后再起（重启与回滚拉起用）")
 	flag.Parse()
 
 	exe, _ := os.Executable()
 	su := core.NewSelfUpdate(mustSettings())
-	handleUpdateLifecycle(su, exe, *updated)
 
-	if err := sys.AcquireSingleInstance("EnvSwitch.SingleInstance"); err != nil {
+	// 先独占，再谈更新：回滚与替换都要动正在运行的 exe，另一个实例还活着时动手，
+	// 改的是别人的映像文件。热更新/回滚拉起的进程一律走等锁——派生它的上一进程
+	// 此刻多半还没退干净，抢一次锁就自杀等于把新版本原地判死刑。
+	if *updated || *waitInstance {
+		if err := sys.AcquireSingleInstanceWait(instanceName, relaunchWait); err != nil {
+			noteRelaunchFailure(exe, err)
+			os.Exit(0)
+		}
+	} else if err := sys.AcquireSingleInstance(instanceName); err != nil {
 		os.Exit(0) // 已有实例
 	}
+
+	handleUpdateLifecycle(su, exe, *updated)
 
 	a := app.New()
 	tray := sys.StartTray("EnvSwitch · 版本切换台",
@@ -80,7 +99,7 @@ func mustSettings() *settings.Settings {
 	return s
 }
 
-// handleUpdateLifecycle 三态：
+// handleUpdateLifecycle 三态（调用方已持有单实例锁）：
 // 1 --updated：写 heartbeat，5s 后确认存活则清 .old（更新成功定稿）；
 // 2 启动即发现 .old 且无新鲜 heartbeat：上次更新崩溃，换回旧版并重启；
 // 3 存在 .old 但 heartbeat 显示上次已确认：残留清理。
@@ -89,27 +108,51 @@ func handleUpdateLifecycle(su *core.SelfUpdate, exe string, updatedFlag bool) {
 		return
 	}
 	if updatedFlag {
+		// heartbeat 只能在拿到锁之后写（调用点已保证）。进门就写的旧实现，让
+		// 「起了进程、抢锁失败自杀」也留下一枚成功凭据：十分钟内看着像更新成功、
+		// 不回滚，十分钟后凭据一过期又被判成崩溃、把已经就位的新版本退回去——
+		// 两个方向都判反，用户只看到「程序关了没装上」。
 		_ = su.WriteHeartbeat()
 		go func() {
 			time.Sleep(5 * time.Second)
 			su.MarkGood()
 			os.Remove(exe + ".old")
+			os.Remove(exe + ".broken") // 更早的崩溃残骸，顺手自愈
 		}()
 		return
 	}
 	if su.RollbackPending(exe) {
 		if err := su.DoRollback(exe); err == nil {
-			c := exec.Command(exe)
+			// 必须带 --wait-instance：本进程要到 os.Exit 才放锁，孩子直接抢会被
+			// 弹死，回滚后照样起不来。
+			c := exec.Command(exe, "--wait-instance")
 			c.SysProcAttr = detachedAttr()
 			_ = c.Start()
 			os.Exit(0)
 		}
 		// 回滚失败：保留现场，正常带旧版继续跑
 	}
-	// 无 .old 时清掉历史 heartbeat（陈旧文件）
+	// 无 .old = 上一轮早已定稿或已回滚，历史 heartbeat 是陈旧文件
 	if _, err := os.Stat(exe + ".old"); err != nil {
-		os.Remove(filepath.Join(settings.Home(), "update", "heartbeat"))
+		su.MarkGood()
 	}
+}
+
+// noteRelaunchFailure 等锁超时：本构建是 -H=windowsgui，没有控制台，不落盘就只剩
+// 「双击没反应」一种现场。写进更新目录，和 package.zip 放一起好找。
+func noteRelaunchFailure(exe string, err error) {
+	dir := filepath.Join(settings.Home(), "update")
+	if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+		return
+	}
+	f, openErr := os.OpenFile(filepath.Join(dir, "relaunch-error.log"),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if openErr != nil {
+		return
+	}
+	fmt.Fprintf(f, "%s 新版本已就位但没拿到单实例锁（上一进程未退出）: %v\nexe=%s\n",
+		time.Now().Format(time.RFC3339), err, exe)
+	_ = f.Close()
 }
 
 func runWindow(a *app.App, hidden bool) {

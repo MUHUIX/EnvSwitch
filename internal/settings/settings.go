@@ -175,15 +175,20 @@ func VersionDir(s *Settings, tool, ver string) string {
 }
 
 // OwnedPathEntries 返回需要写入用户 PATH 的五条路径（按优先级顺序）：
-// 三个 runtime 激活链接 + js 工具 shims + envs.exe 所在目录（安装目录）。
+// js 命令 shims 打头，再三个 runtime 激活链接，最后是 envs.exe 所在目录（安装目录）。
 // npm/pnpm/yarn 一律经 shims，不直接暴露包内 .cmd（其路径假设 node_modules
 // 布局，解包形态会断链）。
+//
+// shims 必须排第一（方案 §9-2 / §2-L2）：node 版本目录自带 npm.cmd，而 current\node 原本
+// 排在 shims 之前 → EnvSwitch 自己生成的 npm shim 一次都不会被搜到，层 2 形同不存在。
+// 只调整顺序、不增删条目：EnsureUserPath 是「按小写全等先摘掉同名旧条目、再按本顺序整体
+// 插到最前」，因此 path ensure 依旧幂等（连续两次第二次报未变化，settings_test 有断言）。
 func OwnedPathEntries(s *Settings) []string {
 	return []string{
+		ShimsDir(s),
 		CurrentLink(s, "node"),
 		CurrentLink(s, "python"),
 		CurrentLink(s, "go"),
-		ShimsDir(s),
 		ExeDir(),
 	}
 }

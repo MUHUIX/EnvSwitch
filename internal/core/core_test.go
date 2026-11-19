@@ -65,16 +65,26 @@ func TestNormAndIndexOfVersion(t *testing.T) {
 }
 
 func TestShimScriptStable(t *testing.T) {
-	s := shimScript("npm", "bin/npm-cli.js")
-	for _, want := range []string{`@ECHO off`, `%ES%\current\npm\bin/npm-cli.js`, `"%NODE%"`, `EXIT /B 78`, `GOTO :envs_missing`} {
+	s := shimScript("npm", "bin/npm-cli.js", "npm", shimExePath())
+	// 原断言里的 `EXIT /B 78` 已按 §9-1 废除，换成新模板的三个必要片段：
+	// 延迟展开在位、envs.exe 绝对路径注入位、无扩展名形态存在且为 LF。
+	// 其余六项（@ECHO off / target 路径 / "%NODE%" / GOTO :envs_missing / 禁括号块 / 幂等）一项不减。
+	for _, want := range []string{
+		`@ECHO off`, `%ES%\current\npm\bin/npm-cli.js`, `"%NODE%"`, `GOTO :envs_missing`,
+		`SETLOCAL ENABLEDELAYEDEXPANSION`, `SET "EXE=` + shimExePath() + `"`,
+	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("shim 缺关键片段 %q:\n%s", want, s)
 		}
 	}
+	sh := posixShimScript("npm", "bin/npm-cli.js", "npm", shimExePath())
+	if !strings.HasPrefix(sh, "#!/usr/bin/env sh\n") || strings.Contains(sh, "\r") {
+		t.Fatal("无扩展名 shim 必须是 #!/usr/bin/env sh 开头且纯 LF 行尾（§6.2-4）")
+	}
 	if strings.Contains(s, ") ELSE (") || strings.Contains(s, "1>&2") {
 		t.Fatal("shim 禁止 IF 括号块与括号内重定向（cmd 解析陷阱）")
 	}
-	if s != shimScript("npm", "bin/npm-cli.js") {
+	if s != shimScript("npm", "bin/npm-cli.js", "npm", shimExePath()) {
 		t.Fatal("shim 生成应幂等")
 	}
 }
