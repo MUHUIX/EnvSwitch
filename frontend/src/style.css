@@ -269,6 +269,7 @@ input {
 .lamp.ok {
   background: var(--ok);
   box-shadow: 0 0 8px var(--ok), 0 0 12px rgba(63, 191, 168, 0.4);
+  animation: lamp-breathe 3.2s ease-in-out infinite;
 }
 
 .lamp.idle {
@@ -278,11 +279,22 @@ input {
 .lamp.up {
   background: var(--warn);
   box-shadow: 0 0 8px var(--warn), 0 0 12px rgba(229, 180, 84, 0.4);
+  animation: lamp-breathe 3.2s ease-in-out infinite;
 }
 
 .lamp.err {
   background: var(--danger);
   box-shadow: 0 0 8px var(--danger), 0 0 12px rgba(242, 109, 109, 0.4);
+  animation: lamp-breathe 3.2s ease-in-out infinite;
+}
+
+@keyframes lamp-breathe {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.3); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lamp.ok, .lamp.up, .lamp.err { animation: none; }
 }
 
 /* 仪表卡格网 */

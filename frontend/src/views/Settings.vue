@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, onMounted } from 'vue'
+import { ref, computed, inject, onMounted } from 'vue'
 import { api, openExternal } from '../bridge'
 import Icon from '../components/Icon.vue'
 
@@ -11,13 +11,22 @@ const updateInfo = ref(null)
 const updateMsg = ref('')
 const applyingUpdate = ref(false)
 
+// 构建版本号统一带 v 前缀（-ldflags 注入的是 tag 名），展示层不再重复拼 v；
+// dev 等非数字版本保持原样，避免出现 "vdev"。
+function tagVer(v) {
+  if (!v) return ''
+  const s = String(v)
+  return /^\d/.test(s) ? `v${s}` : s
+}
+const verText = computed(() => tagVer(st.value?.version || '1.0.0'))
+
 onMounted(async () => {
   try {
     st.value = await api.settings()
     const p = await api.pendingUpdate()
     if (p?.available) {
       updateInfo.value = p
-      updateMsg.value = `发现新版本 v${p.version}`
+      updateMsg.value = `发现新版本 ${tagVer(p.version)}`
     }
   } catch (err) {
     // 降级保护
@@ -31,7 +40,7 @@ async function checkUpdate() {
     const res = await api.checkUpdateNow()
     updateInfo.value = res
     if (res?.available) {
-      updateMsg.value = `发现新版本 v${res.version}`
+      updateMsg.value = `发现新版本 ${tagVer(res.version)}`
     } else if (res?.error) {
       updateMsg.value = `检查失败：${res.error}`
     } else {
@@ -187,7 +196,7 @@ const mirrorOpts = {
               <div class="cfg-info">
                 <div class="ver-state-line">
                   <span class="cfg-label">EnvSwitch 客户端</span>
-                  <span class="size-pill num">v{{ st.version || '1.0.0' }}</span>
+                  <span class="size-pill num">{{ verText }}</span>
                 </div>
                 <span class="cfg-desc" v-if="updateMsg">{{ updateMsg }}</span>
                 <span class="cfg-desc" v-else>自动定时检测新版本，安装由您自主决定</span>
@@ -208,7 +217,7 @@ const mirrorOpts = {
             <!-- 检测到新版本时的详细确认区 -->
             <div class="update-card-box" v-if="updateInfo?.available">
               <div class="update-card-left">
-                <div class="new-ver-title">新版本 v{{ updateInfo.version }} 已准备就绪</div>
+                <div class="new-ver-title">新版本 {{ tagVer(updateInfo.version) }} 已准备就绪</div>
                 <div class="new-ver-notes" v-if="updateInfo.notes">{{ updateInfo.notes }}</div>
                 <div class="new-ver-meta">
                   <span>安装包大小：{{ updateInfo.size }}</span>
@@ -274,7 +283,6 @@ const mirrorOpts = {
         <section class="cfg-group">
           <div class="group-header">
             <h4 class="group-title">多语言与工具链下载镜像源</h4>
-            <span class="group-sub">针对各运行时的下载镜像配置（国内镜像源大幅提升下载速度）</span>
           </div>
 
           <div class="mirrors-grid">
@@ -359,14 +367,14 @@ const mirrorOpts = {
               <div class="about-content">
                 <div class="about-head">
                   <span class="about-name">EnvSwitch</span>
-                  <span class="about-badge ver-num">v{{ st.version || '1.0.0' }}</span>
+                  <span class="about-badge ver-num">{{ verText }}</span>
                   <span class="about-badge author-badge">作者：沐晖</span>
                 </div>
                 <p class="about-intro">
                   全栈开发者多语言与工具链版本极速切换台 · Junction 毫秒重指 · 免命令行 · 零管理员权限依赖
                 </p>
                 <div class="about-meta">
-                  <span>开源协议：MIT License</span>
+                  <span>授权：MIT + 附加使用条款</span>
                   <span class="dot">·</span>
                   <a
                     class="repo-link"
@@ -386,32 +394,6 @@ const mirrorOpts = {
 </template>
 
 <style scoped>
-.crumb-sub {
-  color: var(--ink-3);
-  font-size: 11px;
-}
-
-.save-tip {
-  font-size: 11px;
-  color: var(--accent);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--accent-dim);
-  border: 1px solid var(--accent-line);
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-weight: 500;
-}
-
-.tip-pulse {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 6px var(--accent);
-}
-
 .settings-wrap {
   display: flex;
   flex-direction: column;
@@ -438,11 +420,6 @@ const mirrorOpts = {
   font-weight: 700;
   color: var(--ink-1);
   letter-spacing: -0.01em;
-}
-
-.group-sub {
-  font-size: 11px;
-  color: var(--ink-3);
 }
 
 .cfg-panel {

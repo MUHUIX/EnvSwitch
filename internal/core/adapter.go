@@ -60,3 +60,8 @@ type JSRunner interface {
 	// Shims 命令名 → 包根相对入口 js（如 "npm" → "bin/npm-cli.js"）。
 	Shims() map[string]string
 }
+
+// FastAdopter 可选：总览轮询用的轻量收编列表（版本名与路径，不算目录大小）。
+type FastAdopter interface {
+	AdoptedFast(s *settings.Settings) []Install
+}

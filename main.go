@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -31,12 +32,14 @@ func detachedAttr() *syscall.SysProcAttr {
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// 托盘菜单 ID：(工具序号+1)*100+行号；200+ 为固定动作。
+// 托盘菜单 ID：固定动作 1–9；工具区从 100 起，每工具 100 个号段（组头 + 版本行）。
+// 早期固定动作占了 200 段，导致第二个工具（python）的版本项与「开机自启」等撞号。
 const (
-	idOpenMain    uint16 = 200
-	idToggleAuto  uint16 = 201
-	idCheckUpdate uint16 = 202
-	idQuit        uint16 = 210
+	idOpenMain    uint16 = 1
+	idToggleAuto  uint16 = 2
+	idCheckUpdate uint16 = 3
+	idQuit        uint16 = 4
+	toolBase      uint16 = 100
 	maxPerTool           = 40
 )
 
@@ -117,12 +120,12 @@ func runWindow(a *app.App, hidden bool) {
 		StartHidden:      hidden,
 		OnStartup: func(ctx context.Context) {
 			a.Startup(ctx)
-			mainWindowOpen = !hidden
+			mainWindowOpen.Store(!hidden)
 		},
 		OnBeforeClose: func(ctx context.Context) (prevent bool) {
 			if a.CloseToTray() {
 				wrt.WindowHide(ctx)
-				mainWindowOpen = false
+				mainWindowOpen.Store(false)
 				return true
 			}
 			return false
@@ -130,7 +133,7 @@ func runWindow(a *app.App, hidden bool) {
 		OnDomReady: func(ctx context.Context) {
 			if !hidden {
 				wrt.WindowShow(ctx)
-				mainWindowOpen = true
+				mainWindowOpen.Store(true)
 			}
 		},
 		Bind: []interface{}{a},
@@ -141,16 +144,16 @@ func runWindow(a *app.App, hidden bool) {
 	}
 }
 
-var mainWindowOpen bool
+var mainWindowOpen atomic.Bool
 
 func showMainWindow(a *app.App) {
 	ctx := a.Ctx()
 	if ctx == nil {
 		return
 	}
-	if !mainWindowOpen {
+	if !mainWindowOpen.Load() {
 		wrt.WindowShow(ctx)
-		mainWindowOpen = true
+		mainWindowOpen.Store(true)
 	}
 	wrt.WindowUnminimise(ctx)
 }
@@ -163,6 +166,7 @@ func buildTrayMenu(a *app.App) []sys.MenuItem {
 		if tv.Current != nil {
 			cur = tv.Current.Version
 		}
+		base := toolBase + uint16(ti)*100
 		var sub []sys.MenuItem
 		for ri, row := range a.TrayVersions(tv.ID) {
 			if ri >= maxPerTool {
@@ -172,13 +176,13 @@ func buildTrayMenu(a *app.App) []sys.MenuItem {
 			if row.Source != "store" {
 				label += "  (" + row.Source + ")"
 			}
-			sub = append(sub, sys.MenuItem{ID: uint16((ti+1)*100 + ri + 1), Label: label, Checked: row.Active})
+			sub = append(sub, sys.MenuItem{ID: base + uint16(ri) + 1, Label: label, Checked: row.Active})
 		}
 		if len(sub) == 0 {
-			sub = []sys.MenuItem{{ID: uint16((ti + 1) * 100), Label: "未安装 · 打开主界面安装"}}
+			sub = []sys.MenuItem{{ID: base, Label: "未纳入版本库 · 打开主界面"}}
 		} else {
 			sub = append(sub, sys.MenuItem{Sep: true},
-				sys.MenuItem{ID: uint16((ti + 1) * 100), Label: "管理 " + tv.ID + "…"})
+				sys.MenuItem{ID: base, Label: "管理 " + tv.ID + "…"})
 		}
 		items = append(items, sys.MenuItem{Label: tv.Title + "  ·  " + cur, Sub: sub})
 	}
@@ -197,29 +201,38 @@ func handleTrayPick(a *app.App, id uint16) {
 	switch id {
 	case idOpenMain:
 		showMainWindow(a)
+		return
 	case idToggleAuto:
 		_ = a.SetAutostart(!a.Autostart())
+		return
 	case idCheckUpdate:
 		a.CheckUpdateNow()
+		return
 	case idQuit:
 		a.DisableTrayKeep()
 		wrt.Quit(a.Ctx())
-	default:
-		toolIdx := int(id/100) - 1
-		tools := a.Overview()
-		if toolIdx < 0 || toolIdx >= len(tools) {
-			return
-		}
-		if id%100 == 0 { // 管理入口：打开主界面并定位工具
-			showMainWindow(a)
-			a.JumpToTool(tools[toolIdx].ID)
-			return
-		}
-		rows := a.TrayVersions(tools[toolIdx].ID)
-		i := int(id%100) - 1
-		if i < len(rows) && !rows[i].Active {
-			_ = a.Use(tools[toolIdx].ID, rows[i].Version)
-		}
+		return
+	}
+	if id < toolBase {
+		return
+	}
+	n := int(id - toolBase)
+	toolIdx := n / 100
+	row := n % 100
+	tools := a.Overview()
+	if toolIdx < 0 || toolIdx >= len(tools) {
+		return
+	}
+	toolID := tools[toolIdx].ID
+	if row == 0 { // 管理入口：打开主界面并定位工具
+		showMainWindow(a)
+		a.JumpToTool(toolID)
+		return
+	}
+	rows := a.TrayVersions(toolID)
+	i := row - 1
+	if i >= 0 && i < len(rows) && !rows[i].Active {
+		_ = a.Use(toolID, rows[i].Version)
 	}
 }
 

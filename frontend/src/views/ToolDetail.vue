@@ -65,6 +65,22 @@ function shown(list) {
   return f ? list.filter(r => r.version.startsWith(f)) : list
 }
 
+function isSystemSource(s) {
+  return s === '系统' || s === 'system' || s === 'detected'
+}
+
+function sourceLabel(s) {
+  if (isSystemSource(s)) return '系统'
+  if (s === 'external') return '外部'
+  return s || ''
+}
+
+function sourceNote(s) {
+  if (isSystemSource(s)) return '系统环境'
+  if (s === 'nvm') return 'nvm 收编'
+  return '已激活'
+}
+
 async function doUse(ver) {
   try {
     await api.use(props.tool, ver)
@@ -140,7 +156,7 @@ async function refresh() {
 
         <div class="current-badge">
           <div class="cur-ver num">{{ current ? current.version : '未激活' }}</div>
-          <div class="cur-note" v-if="current">{{ current.source === 'system' ? '系统环境' : (current.source === 'nvm' ? 'nvm 收编' : '已激活') }}</div>
+          <div class="cur-note" v-if="current">{{ sourceNote(current.source) }}</div>
         </div>
       </div>
 
@@ -164,7 +180,7 @@ async function refresh() {
             >
               <span class="lamp" :class="r.active ? 'ok' : 'idle'"></span>
               <span class="ver-name num">{{ r.version }}</span>
-              <span class="src-chip" :class="{ nvm: r.source === 'nvm' }">{{ r.source }}</span>
+              <span class="src-chip" :class="{ nvm: r.source === 'nvm' }">{{ sourceLabel(r.source) }}</span>
               <span v-if="r.active" class="active-tag">当前生效</span>
               <span class="size-col num">{{ r.size }}</span>
 
@@ -172,6 +188,9 @@ async function refresh() {
                 <template v-if="confirmDel === r.version">
                   <button class="btn sm danger-b" @click="doRemove(r.version)">确认删除</button>
                   <button class="btn sm ghost" @click="confirmDel = ''">取消</button>
+                </template>
+                <template v-else-if="isSystemSource(r.source)">
+                  <span v-if="!r.active" class="ro-tag">系统环境</span>
                 </template>
                 <template v-else-if="!r.active">
                   <button class="btn sm primary" @click="doUse(r.version)">切换</button>
@@ -184,7 +203,7 @@ async function refresh() {
                     <Icon name="trash" :size="13" />
                   </button>
                 </template>
-                <span v-else-if="r.source !== 'store'" class="ro-tag">收编自 {{ r.source }}</span>
+                <span v-else-if="r.source !== 'store'" class="ro-tag">收编自 {{ sourceLabel(r.source) }}</span>
               </div>
             </div>
           </div>
@@ -274,12 +293,6 @@ async function refresh() {
   font-size: 20px;
   font-weight: 700;
   color: var(--ink-1);
-}
-
-.tool-desc {
-  font-size: 11.5px;
-  color: var(--ink-3);
-  margin-top: 2px;
 }
 
 .current-badge {

@@ -3,62 +3,24 @@ package tools
 import (
 	"context"
 	"regexp"
-	"strings"
+	"sort"
 
 	"github.com/HUIdada1/envswitch/internal/core"
 	"github.com/HUIdada1/envswitch/internal/settings"
 )
 
-// Pip —— Python 官方包管理器
+// Pip —— Python 官方包管理器。pip 以 wheel 形式随解释器分发，单独解包得不到
+// pip.exe，因此只做本机版本检测（随 Python 一起切换），不提供独立安装入口。
 type Pip struct{}
 
-func (Pip) ID() string           { return "pip" }
-func (Pip) Title() string        { return "pip" }
-func (Pip) BinSub() string       { return "" }
+func (Pip) ID() string                { return "pip" }
+func (Pip) Title() string             { return "pip" }
+func (Pip) BinSub() string            { return "" }
 func (Pip) Smoke() (string, []string) { return "pip.exe", []string{"--version"} }
-func (Pip) ProbeFiles() []string { return []string{"pip.exe"} }
-
-var pipVerRe = regexp.MustCompile(`^\d+\.\d+(?:\.\d+)?$`)
+func (Pip) ProbeFiles() []string      { return []string{"pip.exe"} }
 
 func (Pip) FetchRemote(s *settings.Settings) ([]core.RemoteVersion, error) {
-	type pypiResp struct {
-		Releases map[string][]struct {
-			Filename string `json:"filename"`
-			URL      string `json:"url"`
-			Size     int64  `json:"size"`
-			PackType string `json:"packagetype"`
-		} `json:"releases"`
-	}
-	var resp pypiResp
-	url := "https://pypi.org/pypi/pip/json"
-	if err := core.GetJSON(context.Background(), url, &resp); err != nil {
-		return []core.RemoteVersion{
-			{Version: "24.0", Size: -1, URL: "https://pypi.org/packages/source/p/pip/pip-24.0.tar.gz", Archive: "pip-24.0.tar.gz"},
-			{Version: "23.3.2", Size: -1, URL: "https://pypi.org/packages/source/p/pip/pip-23.3.2.tar.gz", Archive: "pip-23.3.2.tar.gz"},
-			{Version: "23.2.1", Size: -1, URL: "https://pypi.org/packages/source/p/pip/pip-23.2.1.tar.gz", Archive: "pip-23.2.1.tar.gz"},
-		}, nil
-	}
-	var out []core.RemoteVersion
-	for ver, files := range resp.Releases {
-		if !pipVerRe.MatchString(ver) {
-			continue
-		}
-		for _, f := range files {
-			if strings.HasSuffix(f.Filename, ".whl") || strings.HasSuffix(f.Filename, ".tar.gz") {
-				out = append(out, core.RemoteVersion{
-					Version: ver,
-					Size:    f.Size,
-					URL:     f.URL,
-					Archive: f.Filename,
-				})
-				break
-			}
-		}
-	}
-	if len(out) > 50 {
-		out = out[:50]
-	}
-	return out, nil
+	return nil, core.W(core.ErrUsage, "pip 随 Python 发行版提供，不单独安装；请切换 Python 版本，pip 会同步")
 }
 
 // Nvm —— nvm-windows Node 版本管理器本身
@@ -73,21 +35,25 @@ func (Nvm) ProbeFiles() []string { return []string{"nvm.exe"} }
 var nvmAssetRe = regexp.MustCompile(`^nvm-noinstall\.zip$`)
 
 func (Nvm) FetchRemote(s *settings.Settings) ([]core.RemoteVersion, error) {
+	// 新版仓库前 20 条全是 2.x beta（会被 prerelease 过滤掉），
+	// 稳定版 1.2.2 排在更后面，因此一次取 100 条。
 	return ghBinaryReleases(context.Background(),
-		"https://api.github.com/repos/coreybutler/nvm-windows/releases?per_page=20",
+		"https://api.github.com/repos/coreybutler/nvm-windows/releases?per_page=100",
 		nvmAssetRe, "nvm")
 }
 
-// Git —— Git for Windows
+// Git —— Git for Windows（MinGit 便携版：解包即得 cmd/git.exe，可独立入 store）
 type Git struct{}
 
-func (Git) ID() string           { return "git" }
-func (Git) Title() string        { return "Git" }
-func (Git) BinSub() string       { return "cmd" }
+func (Git) ID() string                { return "git" }
+func (Git) Title() string             { return "Git" }
+func (Git) BinSub() string            { return "cmd" }
 func (Git) Smoke() (string, []string) { return "git.exe", []string{"--version"} }
-func (Git) ProbeFiles() []string { return []string{"cmd/git.exe", "bin/git.exe"} }
+func (Git) ProbeFiles() []string      { return []string{"cmd/git.exe", "bin/git.exe"} }
 
-var gitAssetRe = regexp.MustCompile(`(?i)^PortableGit-.*-64-bit\.7z\.exe$`)
+// 只取 MinGit 标准包：PortableGit 是 7z 自解压 exe，按单文件落位后拿不到 cmd/git.exe；
+// busybox 变体条目不参与（版本相同会与标准包重复）。
+var gitAssetRe = regexp.MustCompile(`(?i)^MinGit-\d+(?:\.\d+)*-64-bit\.zip$`)
 
 func (Git) FetchRemote(s *settings.Settings) ([]core.RemoteVersion, error) {
 	return ghBinaryReleases(context.Background(),
@@ -95,21 +61,46 @@ func (Git) FetchRemote(s *settings.Settings) ([]core.RemoteVersion, error) {
 		gitAssetRe, "git")
 }
 
-// Docker —— Docker CLI
+// Docker —— Docker CLI（官方静态 Windows 包）
 type Docker struct{}
 
-func (Docker) ID() string           { return "docker" }
-func (Docker) Title() string        { return "Docker" }
-func (Docker) BinSub() string       { return "" }
+func (Docker) ID() string                { return "docker" }
+func (Docker) Title() string             { return "Docker" }
+func (Docker) BinSub() string            { return "" }
 func (Docker) Smoke() (string, []string) { return "docker.exe", []string{"--version"} }
-func (Docker) ProbeFiles() []string { return []string{"docker.exe"} }
+func (Docker) ProbeFiles() []string      { return []string{"docker.exe"} }
 
-var dockerAssetRe = regexp.MustCompile(`(?i)^docker-.*\.zip$`)
+// docker/cli 仓库没有 GitHub Release，官方静态包只挂在 download.docker.com 目录页，
+// 因此这里解析目录索引而不是走 ghBinaryReleases。
+const dockerStaticBase = "https://download.docker.com/win/static/stable/x86_64"
+
+var dockerZipRe = regexp.MustCompile(`docker-(\d+(?:\.\d+){2})\.zip`)
 
 func (Docker) FetchRemote(s *settings.Settings) ([]core.RemoteVersion, error) {
-	return ghBinaryReleases(context.Background(),
-		"https://api.github.com/repos/docker/cli/releases?per_page=25",
-		dockerAssetRe, "docker")
+	html, err := core.GetText(context.Background(), dockerStaticBase+"/")
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []core.RemoteVersion
+	for _, m := range dockerZipRe.FindAllStringSubmatch(html, -1) {
+		ver := m[1]
+		if seen[ver] {
+			continue
+		}
+		seen[ver] = true
+		archive := "docker-" + ver + ".zip"
+		out = append(out, core.RemoteVersion{
+			Version: ver, Size: -1,
+			URL:     dockerStaticBase + "/" + archive,
+			Archive: archive,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return core.CompareVersions(out[i].Version, out[j].Version) > 0 })
+	if len(out) > 40 {
+		out = out[:40]
+	}
+	return out, nil
 }
 
 // Redis —— Redis for Windows

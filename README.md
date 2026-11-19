@@ -36,7 +36,7 @@ EnvSwitch 的做法是独立版本库加 junction 重指向。切换就是毫秒
 
 PATH 里只插入五条：`current\node`、`current\python`、`current\go`、`bin\shims`，以及 `envs.exe` 所在目录。因为链接路径不变，切换版本不需要改注册表。已打开的终端不会变，新开的终端立即用新版本，这是 Windows 环境块的机制，不是 bug。
 
-只有 node、python、go 和 npm / npx / pnpm / pnpx / yarn 会被自动接进 PATH。其余工具装完能管能切，但命令行要自己补一条 `current\<工具>`，一次加好之后切版本不用再动 —— 细节在[使用说明书](docs/使用说明书.md)。
+只有 node、python、go 和 npm / npx / pnpm / pnpx / yarn 会被自动接进 PATH。其余工具装完能管能切，但命令行要自己补一条 `%LOCALAPPDATA%\EnvSwitch\current\<工具>`，一次加好之后切版本不用再动。
 
 安装走同一条流水线：选源下载、断点续传、哈希校验、解包落位、跑一遍版本号冒烟。npm 系包用 registry 的 `dist.integrity` 校验，node 和 python 用官方哈希。主源挂了会自动试备用源，哈希不对则直接失败删件。
 
@@ -44,14 +44,16 @@ PATH 里只插入五条：`current\node`、`current\python`、`current\go`、`bi
 
 ## 支持的工具
 
-共 17 个，按界面里的分组：
+共 22 个，按界面里的分组：
 
 - **语言运行时**：node.js、python、Go、Rust、PHP、Deno、Bun
-- **包管理与工具链**：npm、pnpm、yarn classic、uv
+- **包管理与工具链**：npm、pnpm、yarn classic、pip、nvm-windows、uv、Git
 - **企业运行时 (JVM/.NET)**：JDK (Temurin)、Maven、Gradle、.NET SDK
-- **云原生与运维**：kubectl、Terraform
+- **云原生与运维**：Docker、kubectl、Terraform、Redis
 
-每个工具各自管理版本、镜像源和缓存，互不牵连。node / npm / pnpm / yarn 默认走 npmmirror，Go 默认 golang.google.cn，python 默认先探 GitHub 不通自动退 NJU 镜像，Maven 可切阿里云。前四个能在设置页直接切，python / go / maven 用 `envs config set mirror.<工具> <源>`，见 [使用说明书 §9](docs/使用说明书.md)。
+其中 pip 随 Python 解释器分发、nvm-windows 的 node 版本归它自己所有，这两项只做本机检测与只读收编；其余工具都会下载进版本库并可切换。
+
+每个工具各自管理版本、镜像源和缓存，互不牵连。node / npm / pnpm / yarn 默认走 npmmirror，Go 默认 golang.google.cn，python 默认先探 GitHub 不通自动退 NJU 镜像，Maven 可切阿里云。前四个能在设置页直接切，python / go / maven 用 `envs config set mirror.<工具> <源>`。
 
 ## 安装
 
@@ -73,7 +75,7 @@ envs use node 22            # 切换（毫秒级重指 junction），顺带首�
 envs doctor                 # 体检：PATH 顺序、链接健康、共存冲突、WebView2
 ```
 
-完整操作手册（界面导览、每个设置项的含义、数据搬家、镜像与代理、故障排查、已知限制）见 **[docs/使用说明书.md](docs/使用说明书.md)**。各版本改了什么见 [releases/](releases/) 目录与 [Releases 页面](https://github.com/HUIdada1/EnvSwitch/releases)。
+各版本改了什么见 [releases/](releases/) 目录与 [Releases 页面](https://github.com/HUIdada1/EnvSwitch/releases)。
 
 ## 命令行
 
@@ -118,11 +120,11 @@ GUI 基于 Wails v2 + Vue 3，窗口自绘标题栏，关闭默认缩到托盘�
 
 前端单独开发用 `wails dev`，有热更新。
 
-## 文档
+## 帮助
 
-- [使用说明书](docs/使用说明书.md) —— 面向使用者：安装卸载、界面与托盘、命令行全表、配置项、数据搬家、镜像与代理、故障排查、已知限制
-- [架构方案](docs/架构方案.md) —— 选型依据、切换机制、安装流水线、更新协议、里程碑
-- [设计语言](docs/设计语言.md) —— 色板、栅格、组件规范，前端 token 的唯一来源
+- `envs --help` / `envs <command> --help`：命令行全部用法
+- [Issues](https://github.com/HUIdada1/EnvSwitch/issues)：问题反馈
+- [Releases](https://github.com/HUIdada1/EnvSwitch/releases)：版本说明与下载
 
 ## 使用声明
 

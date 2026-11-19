@@ -449,7 +449,6 @@ function copyTerminalCmd(shellType) {
     <header class="topbar">
       <span class="crumb">
         <b>网络代理</b>
-        <span class="crumb-sub">/ 出口池与出站代理配置</span>
       </span>
       <div class="top-actions">
         <button class="btn ghost sm" :disabled="clashBusy" @click="syncFromClash">
@@ -556,7 +555,6 @@ function copyTerminalCmd(shellType) {
         <div class="cfg-group">
           <div class="group-header-row">
             <h4 class="group-title">出口池管理</h4>
-            <span class="group-sub-tip">可单条启停、实时连通测速、探测出口 IP</span>
           </div>
 
           <div class="cfg-panel tbl-panel">
@@ -713,7 +711,6 @@ function copyTerminalCmd(shellType) {
         <div class="cfg-group">
           <div class="group-header-row">
             <h4 class="group-title">终端与工具链网络代理命令</h4>
-            <span class="group-sub-tip">一键复制对应终端命令，无需手动拼接地址</span>
           </div>
 
           <div class="cfg-panel dev-panel">
@@ -954,11 +951,6 @@ function copyTerminalCmd(shellType) {
   font-size: 13.5px;
   font-weight: 600;
   color: var(--ink-1);
-}
-
-.group-sub-tip {
-  font-size: 12px;
-  color: var(--ink-3);
 }
 
 .cfg-panel {

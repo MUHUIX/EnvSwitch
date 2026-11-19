@@ -59,7 +59,7 @@ EnvSwitch 自身采用 [MIT License + 附加使用条款](./LICENSE) 的复合�
 
 本项目管理或提及的下列名称均为其各自所有者的商标或注册商标，本项目与这些所有者之间不存在隶属、赞助或背书关系：
 
-Node.js（OpenJS Foundation）、npm / npx（npm, Inc.）、pnpm、Yarn（Meta）、Python（PSF）、Go（Google）、Rust（Rust Foundation）、PHP（PHP Group）、Deno、Bun、uv（Astral）、Java / JDK / Temurin（Oracle / Eclipse Foundation）、Maven（Apache Software Foundation）、Gradle（Gradle, Inc.）、.NET（Microsoft）、kubectl（CNCF / Linux Foundation）、Terraform（HashiCorp）、Windows（Microsoft）。
+Node.js（OpenJS Foundation）、npm / npx（npm, Inc.）、pnpm、Yarn（Meta）、Python（PSF）、Go（Google）、Rust（Rust Foundation）、PHP（PHP Group）、Deno、Bun、uv（Astral）、Git（Software Freedom Conservancy）、nvm-windows（Corey Butler）、Java / JDK / Temurin（Oracle / Eclipse Foundation）、Maven（Apache Software Foundation）、Gradle（Gradle, Inc.）、.NET（Microsoft）、Docker（Docker, Inc.）、Redis（Redis Ltd.）、kubectl（CNCF / Linux Foundation）、Terraform（HashiCorp）、Windows（Microsoft）。
 
 上述列举用于说明互不隶属的事实，不构成对任何商标权的主张。
 

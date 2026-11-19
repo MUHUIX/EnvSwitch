@@ -27,6 +27,7 @@ import (
 type App struct {
 	ctx          context.Context
 	mu           sync.Mutex
+	updateMu     sync.Mutex // 保护 lastUpdateCheck（后台定时检查与前端查询并发）
 	s            *settings.Settings
 	ads          []core.Adapter
 	busy         map[string]context.CancelFunc // tool -> 进行中的安装任务（同工具串行）
@@ -168,12 +169,12 @@ type sysDetectCacheItem struct {
 var (
 	sysDetectCache   = map[string]sysDetectCacheItem{}
 	sysDetectCacheMu sync.Mutex
-	verReg           = regexp.MustCompile(`(?i)(?:go|version\s+"?|Python\s+)?v?(\d+\.\d+(?:\.\d+)?(?:[_\.][0-9a-zA-Z]+)?)`)
+	verReg           = regexp.MustCompile(`(?i)(?:go|version\s+"?|Python\s+)?v?(\d+\.\d+(?:\.\d+)?(?:_\d+)?)`)
 )
 
 func (a *App) detectActiveSystemVersion(ad core.Adapter) (string, string, string) {
 	sysDetectCacheMu.Lock()
-	if it, ok := sysDetectCache[ad.ID()]; ok && time.Since(it.ts) < 10*time.Second {
+	if it, ok := sysDetectCache[ad.ID()]; ok && time.Since(it.ts) < 60*time.Second {
 		sysDetectCacheMu.Unlock()
 		return it.ver, it.source, it.path
 	}
@@ -237,54 +238,75 @@ func queryVersionFromExe(ad core.Adapter, resolved string) string {
 	if len(m) >= 2 {
 		return m[1]
 	}
-	trimmed := strings.TrimSpace(string(out))
-	if idx := strings.Index(trimmed, "\n"); idx > 0 {
-		trimmed = strings.TrimSpace(trimmed[:idx])
-	}
-	return trimmed
+	// 拿不到规范版本号就返回空，由调用方标记"已检测"，
+	// 不要把 "Error: JAVA_HOME not found" 之类的报错当成版本号显示。
+	return ""
 }
 
 // —— 查询接口 ——
 
 func (a *App) Overview() []ToolView {
-	out := make([]ToolView, 0, len(a.ads))
-	for _, ad := range a.ads {
-		kind := "runtime"
-		if _, ok := ad.(core.JSRunner); ok {
-			kind = "js"
-		}
-		installs := core.ListInstalls(ad, a.s)
-		var installedNames []string
-		for _, iv := range installs {
-			installedNames = append(installedNames, iv.Version)
-		}
-
-		cur, _, _ := core.CurrentInstall(ad, a.s)
-		tv := ToolView{
-			ID:        ad.ID(),
-			Title:     ad.Title(),
-			Kind:      kind,
-			Group:     ad.Group(),
-			Remote:    remoteCacheState(a.s, ad.ID()),
-			Installed: installedNames,
-		}
-		if cur != nil {
-			tv.Current = &InstallView{Version: cur.Version, Source: cur.Source, Size: core.HumanSize(cur.Size), Active: true, Editable: cur.Editable}
-			tv.Lamp = "ok"
-		} else {
-			// 未在 EnvSwitch 内部激活，实时检测系统当前生效的真实版本
-			if sysVer, sysSrc, _ := a.detectActiveSystemVersion(ad); sysVer != "" {
-				tv.Current = &InstallView{Version: sysVer, Source: sysSrc, Size: "-", Active: true, Editable: false}
-				tv.Lamp = "ok"
-			} else if len(installs) > 0 {
-				tv.Lamp = "idle" // 本地有安装但没激活
-			} else {
-				tv.Lamp = "off"
-			}
-		}
-		out = append(out, tv)
+	out := make([]ToolView, len(a.ads))
+	// 系统版本探测要起子进程，串行跑 20 多个工具会让首屏明显等待；
+	// 并发上限 4 路，既缩短总耗时又不至于把机器打满。
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	for i, ad := range a.ads {
+		wg.Add(1)
+		go func(i int, ad core.Adapter) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			out[i] = a.toolView(ad)
+		}(i, ad)
 	}
+	wg.Wait()
 	return out
+}
+
+func (a *App) toolView(ad core.Adapter) ToolView {
+	kind := "runtime"
+	if _, ok := ad.(core.JSRunner); ok {
+		kind = "js"
+	}
+	installs := core.ListInstallsFast(ad, a.s)
+	var installedNames []string
+	for _, iv := range installs {
+		installedNames = append(installedNames, iv.Version)
+	}
+
+	cur, _, _ := core.CurrentInstall(ad, a.s)
+	tv := ToolView{
+		ID:        ad.ID(),
+		Title:     ad.Title(),
+		Kind:      kind,
+		Group:     ad.Group(),
+		Remote:    remoteCacheState(a.s, ad.ID()),
+		Installed: installedNames,
+	}
+	if cur != nil {
+		tv.Current = &InstallView{Version: cur.Version, Source: cur.Source, Size: core.HumanSize(cur.Size), Active: true, Editable: cur.Editable}
+		tv.Lamp = "ok"
+	} else {
+		// 未在 EnvSwitch 内部激活，实时检测系统当前生效的真实版本
+		if sysVer, sysSrc, _ := a.detectActiveSystemVersion(ad); sysVer != "" {
+			tv.Current = &InstallView{Version: sysVer, Source: sysSrc, Size: "-", Active: true, Editable: false}
+			tv.Lamp = "ok"
+		} else if len(installs) > 0 {
+			tv.Lamp = "idle" // 本地有安装但没激活
+		} else {
+			tv.Lamp = "off"
+		}
+	}
+	return tv
+}
+
+// RefreshEnv 清空系统版本探测缓存并重新总览（「检索环境」按钮 = 强制真机复检）。
+func (a *App) RefreshEnv() []ToolView {
+	sysDetectCacheMu.Lock()
+	sysDetectCache = map[string]sysDetectCacheItem{}
+	sysDetectCacheMu.Unlock()
+	return a.Overview()
 }
 
 func (a *App) Local(tool string) ([]RowView, error) {
@@ -294,29 +316,23 @@ func (a *App) Local(tool string) ([]RowView, error) {
 	}
 	cur, _, _ := core.CurrentInstall(ad, a.s)
 	installs := core.ListInstalls(ad, a.s)
-	out := make([]RowView, 0, len(installs))
-	hasSys := false
+	out := make([]RowView, 0, len(installs)+1)
 	for _, iv := range installs {
 		active := cur != nil && cur.Version == iv.Version
-		if iv.Source == "system" || iv.Source == "detected" {
-			hasSys = true
-		}
 		out = append(out, RowView{
 			Version: iv.Version, Source: iv.Source, Size: core.HumanSize(iv.Size),
 			BinDir: iv.BinDir, Active: active,
 		})
 	}
-	if !hasSys {
-		if sysVer, sysSrc, binDir := a.detectActiveSystemVersion(ad); sysVer != "" {
-			active := cur == nil
-			out = append(out, RowView{
-				Version: sysVer,
-				Source:  sysSrc,
-				Size:    "-",
-				BinDir:  binDir,
-				Active:  active,
-			})
-		}
+	// 系统里实际生效的版本（不在版本库）追加为只读行
+	if sysVer, sysSrc, binDir := a.detectActiveSystemVersion(ad); sysVer != "" {
+		out = append(out, RowView{
+			Version: sysVer,
+			Source:  sysSrc,
+			Size:    "-",
+			BinDir:  binDir,
+			Active:  cur == nil,
+		})
 	}
 	return out, nil
 }
@@ -567,13 +583,23 @@ func (a *App) OpenStoreDir() {
 	}
 }
 
-// TrayVersions 托盘菜单数据：每工具已装版本 + 激活标记。
+// TrayVersions 托盘菜单数据：只列可切换的版本（store / nvm 收编），不算目录大小。
+// 系统检测出来的版本不在版本库里，点它无法切换，列出来只会造成"点了没反应"。
 func (a *App) TrayVersions(tool string) []RowView {
-	rows, err := a.Local(tool)
-	if err != nil {
+	ad := tools.ByID(tool)
+	if ad == nil {
 		return nil
 	}
-	return rows
+	cur, _, _ := core.CurrentInstall(ad, a.s)
+	installs := core.ListInstallsFast(ad, a.s)
+	out := make([]RowView, 0, len(installs))
+	for _, iv := range installs {
+		out = append(out, RowView{
+			Version: iv.Version, Source: iv.Source, Size: "-",
+			BinDir: iv.BinDir, Active: cur != nil && cur.Version == iv.Version,
+		})
+	}
+	return out
 }
 
 func (a *App) emitStatus() {
@@ -599,19 +625,29 @@ func (a *App) CheckUpdateNow() UpdateInfo {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	m, asset, err := core.CheckUpdate(ctx, a.s.Proxy, BuildVersion())
+	var info UpdateInfo
 	if err != nil {
-		lastUpdateCheck = UpdateInfo{Error: err.Error()}
+		info = UpdateInfo{Error: err.Error()}
 	} else if m == nil {
-		lastUpdateCheck = UpdateInfo{Available: false}
+		info = UpdateInfo{Available: false}
 	} else {
-		lastUpdateCheck = UpdateInfo{Available: true, Version: m.Version, Notes: m.Notes, Size: core.HumanSize(asset.Size)}
+		info = UpdateInfo{Available: true, Version: m.Version, Notes: m.Notes, Size: core.HumanSize(asset.Size)}
 	}
-	wrt.EventsEmit(a.ctx, "update", lastUpdateCheck)
-	return lastUpdateCheck
+	a.updateMu.Lock()
+	lastUpdateCheck = info
+	a.updateMu.Unlock()
+	if a.ctx != nil {
+		wrt.EventsEmit(a.ctx, "update", info)
+	}
+	return info
 }
 
 // PendingUpdate 前端启动时取最近一次检查结果（异步检查完成后走事件）。
-func (a *App) PendingUpdate() UpdateInfo { return lastUpdateCheck }
+func (a *App) PendingUpdate() UpdateInfo {
+	a.updateMu.Lock()
+	defer a.updateMu.Unlock()
+	return lastUpdateCheck
+}
 
 // ApplyUpdate 下载 → 校验 → 自替换 → 带 --updated 重启 → 退出本进程。
 func (a *App) ApplyUpdate() error {

@@ -9,8 +9,8 @@ import (
 	"github.com/HUIdada1/envswitch/internal/settings"
 )
 
-// version 从 tag 提取数字段（deno tag=v2.9.8，bun tag=bun-v1.4.4）
-var tagVer = regexp.MustCompile(`\d+\.\d+(?:\.\d+)?`)
+// version 从 tag 提取数字段（deno tag=v2.9.8，bun tag=bun-v1.4.4，redis tag=5.0.14.1）
+var tagVer = regexp.MustCompile(`\d+(?:\.\d+)+`)
 
 // deno / bun：GitHub release 独立二进制 zip（解包展平后根目录即 exe）。
 

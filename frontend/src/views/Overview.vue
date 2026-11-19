@@ -13,9 +13,23 @@ const flip = ref('')
 const upd = ref({ available: false })
 const updBusy = ref(false)
 const refreshing = ref(false)
+const diagPane = ref(null)
 
 let offUpdate = () => {}
 let pollTimer = null
+
+function isSystemSource(s) {
+  return s === '系统' || s === 'system' || s === 'detected'
+}
+
+// 系统环境条目只做展示：它没有进版本库，无法通过 junction 切过去
+function pickable(r) {
+  return !isSystemSource(r.source)
+}
+
+function scrollToDoctor() {
+  diagPane.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 async function pollOverview() {
   try {
@@ -32,7 +46,9 @@ async function manualRefresh() {
   if (refreshing.value) return
   refreshing.value = true
   try {
-    await pollOverview()
+    // 强制清缓存复检：否则 60 秒内的探测结果会被直接复用，按钮等于没点
+    const list = await api.refreshEnv()
+    if (list && list.length) tools.value = list
     doctors.value = (await api.doctor()) || []
   } finally {
     setTimeout(() => {
@@ -91,6 +107,8 @@ function closePop() {
 async function pick(ver) {
   if (!pop.value) return
   const t = pop.value.tool
+  const row = pop.value.rows.find(r => r.version === ver)
+  if (row && !pickable(row)) return
   try {
     await api.use(t, ver)
     flip.value = t
@@ -107,6 +125,7 @@ function formatSource(s) {
   if (!s) return ''
   if (s === 'nvm') return 'nvm'
   if (s === 'store') return 'store'
+  if (s === 'external') return '外部'
   if (s === '系统' || s === 'system' || s === 'detected') return '系统'
   return s
 }
@@ -128,7 +147,7 @@ const warnCount = computed(() =>
           <span>{{ refreshing ? '检索中…' : '检索环境' }}</span>
         </button>
 
-        <button class="btn ghost sm" @click="emit('open-tool', tools[0]?.id || 'node')">
+        <button class="btn ghost sm" @click="scrollToDoctor">
           <Icon name="alert" :size="14" />
           <span>环境诊断</span>
           <span v-if="warnCount" class="warn-pill">{{ warnCount }} 异常</span>
@@ -205,12 +224,12 @@ const warnCount = computed(() =>
                 v-for="r in pop.rows"
                 :key="r.version"
                 class="pop-item"
-                :class="{ active: r.active }"
+                :class="{ active: r.active, readonly: !pickable(r) }"
                 @click="pick(r.version)"
               >
                 <span class="lamp" :class="r.active ? 'ok' : 'idle'"></span>
                 <span class="num ver-label">{{ r.version }}</span>
-                <span class="src-tag" :class="{ nvm: r.source === 'nvm' }">{{ formatSource(r.source) }}</span>
+                <span class="src-tag" :class="r.source">{{ formatSource(r.source) }}</span>
                 <Icon v-if="r.active" name="check" :size="13" class="check-icon" />
               </button>
 
@@ -229,7 +248,7 @@ const warnCount = computed(() =>
       </div>
 
       <!-- 环境健康诊断面板 -->
-      <div class="info-duo">
+      <div class="info-duo" ref="diagPane">
         <div class="info-panel full-width">
           <div class="panel-header">
             <h4>环境健康诊断</h4>
@@ -248,11 +267,6 @@ const warnCount = computed(() =>
 </template>
 
 <style scoped>
-.crumb-sub {
-  color: var(--ink-3);
-  font-size: 11px;
-}
-
 .refresh-btn {
   gap: 5px;
 }
@@ -514,6 +528,16 @@ const warnCount = computed(() =>
 .pop-item:hover {
   background: var(--surface-raised);
   color: var(--ink-1);
+}
+
+.pop-item.readonly {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.pop-item.readonly:hover {
+  background: transparent;
+  color: var(--ink-2);
 }
 
 .pop-item.active {

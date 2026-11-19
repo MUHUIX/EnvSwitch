@@ -61,6 +61,9 @@ func (n Node) FetchRemote(s *settings.Settings) ([]core.RemoteVersion, error) {
 // Adopted —— 收编 nvm-windows 已装版本（只读）。
 func (Node) Adopted(s *settings.Settings) []core.Install { return core.NvmVersions() }
 
+// AdoptedFast —— 总览轮询用：只列版本，不统计目录大小。
+func (Node) AdoptedFast(s *settings.Settings) []core.Install { return core.NvmVersionsFast() }
+
 func hasStr(list []string, v string) bool {
 	for _, x := range list {
 		if x == v {

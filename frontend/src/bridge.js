@@ -122,35 +122,45 @@ function demo (method, args) {
   }
   if (method === 'Overview') {
     const mk = (id, title, kind, group, lamp, cur) => ({
-      id, title, kind, group, lamp, remoteState: 'pending',
+      id, title, kind, group, lamp, remoteState: 'pending', installed: [],
       current: cur ? { version: cur, source: kind === 'js' ? 'store' : (id === 'node' ? 'nvm' : 'store'), size: '—', active: true } : null
     })
     return [
       mk('node', 'node.js', 'runtime', 'runtime', 'ok', '22.22.0'),
       mk('python', 'python', 'runtime', 'runtime', 'idle', null),
       mk('go', 'Go', 'runtime', 'runtime', 'ok', '1.26.5'),
+      mk('rust', 'Rust', 'runtime', 'runtime', 'off', null),
+      mk('php', 'PHP', 'runtime', 'runtime', 'off', null),
       mk('deno', 'Deno', 'runtime', 'runtime', 'off', null),
       mk('bun', 'Bun', 'runtime', 'runtime', 'off', null),
       mk('npm', 'npm', 'js', 'packages', 'idle', null),
       mk('pnpm', 'pnpm', 'js', 'packages', 'up', null),
       mk('yarn', 'yarn classic', 'js', 'packages', 'off', null),
-      mk('java', 'JDK (Temurin)', 'runtime', 'jvm', 'ok', '21.0.5'),
-      mk('maven', 'Maven', 'runtime', 'jvm', 'idle', null),
-      mk('gradle', 'Gradle', 'runtime', 'jvm', 'off', null),
-      mk('dotnet', '.NET SDK', 'runtime', 'dotnet', 'off', null),
+      mk('pip', 'pip', 'runtime', 'packages', 'ok', '22.3'),
+      mk('nvm', 'nvm-windows', 'runtime', 'packages', 'ok', '1.2.2'),
+      mk('uv', 'uv', 'runtime', 'packages', 'off', null),
+      mk('git', 'Git', 'runtime', 'packages', 'ok', '2.49.0'),
+      mk('java', 'JDK (Temurin)', 'runtime', 'enterprise', 'ok', '1.8.0_102'),
+      mk('maven', 'Maven', 'runtime', 'enterprise', 'idle', null),
+      mk('gradle', 'Gradle', 'runtime', 'enterprise', 'off', null),
+      mk('dotnet', '.NET SDK', 'runtime', 'enterprise', 'off', null),
+      mk('docker', 'Docker', 'runtime', 'cloud', 'ok', '27.3.1'),
       mk('kubectl', 'kubectl', 'runtime', 'cloud', 'off', null),
-      mk('terraform', 'Terraform', 'runtime', 'cloud', 'off', null)
+      mk('terraform', 'Terraform', 'runtime', 'cloud', 'off', null),
+      mk('redis', 'Redis', 'runtime', 'cloud', 'ok', '5.0.14')
     ]
   }
   if (method === 'Local') return []
   if (method === 'Remote') return []
   if (method === 'Doctor') return []
-  if (method === 'Settings') return { autostart: false, closeToTray: true, checkUpdateOnStart: true, storePath: '(dev)', mirrors: {}, proxy: '', indexCacheMinutes: 10, version: 'dev', remoteState: {}, totalSize: '—' }
+  if (method === 'RefreshEnv') return demo('Overview', args)
+  if (method === 'Settings') return { autostart: false, closeToTray: true, autoCheckUpdate: true, checkUpdateOnStart: true, storePath: '(dev)', mirrors: {}, proxy: '', indexCacheMinutes: 10, version: 'dev', remoteState: {}, totalSize: '—' }
   return null
 }
 
 export const api = {
   overview: () => call('Overview'),
+  refreshEnv: () => call('RefreshEnv'),
   local: (t) => call('Local', t),
   remote: (t) => call('Remote', t),
   doctor: () => call('Doctor'),
@@ -164,7 +174,7 @@ export const api = {
   refreshIndex: (t) => call('RefreshIndex', t),
   openStoreDir: () => call('OpenStoreDir'),
   pendingUpdate: () => call('PendingUpdate'),
-  checkUpdate: () => call('CheckUpdateNow'),
+  checkUpdateNow: () => call('CheckUpdateNow'),
   applyUpdate: () => call('ApplyUpdate'),
   netproxyList: () => call('NetProxyList'),
   netproxySave: (draft) => call('NetProxySave', draft),
@@ -187,6 +197,11 @@ export const win = {
   minimise () { rt()?.WindowMinimise() },
   toggleMaximise () { rt()?.WindowToggleMaximise() },
   close () { rt()?.WindowClose() },
+  isMaximised () {
+    const r = rt()
+    if (!r?.WindowIsMaximised) return Promise.resolve(false)
+    return r.WindowIsMaximised()
+  },
   isWails () { return !!window.runtime }
 }
 export function openExternal (url) {

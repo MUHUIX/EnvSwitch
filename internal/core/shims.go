@@ -59,6 +59,16 @@ func PathExeName(ad Adapter) string {
 		return name + ".cmd"
 	}
 	exe, _ := ad.Smoke()
+	if exe == "" {
+		// Maven / Gradle 的冒烟交给用户环境（依赖 JAVA_HOME），但仍要能在 PATH 上被识别。
+		switch ad.ID() {
+		case "maven":
+			return "mvn.cmd"
+		case "gradle":
+			return "gradle.bat"
+		}
+		return ""
+	}
 	return filepath.Base(exe)
 }
 

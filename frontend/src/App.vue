@@ -91,6 +91,8 @@ provide('hasUpdate', hasUpdate)
 
 let offNavigate = () => {}
 let offUpdate = () => {}
+let offStatus = () => {}
+let offInstall = () => {}
 onMounted(async () => {
   applyTheme(isDark.value)
   try {
@@ -108,18 +110,19 @@ onMounted(async () => {
   offUpdate = on('update', (u) => {
     hasUpdate.value = !!u?.available
   })
+  offStatus = on('status', (list) => { tools.value = list })
+  offInstall = on('install', (p) => {
+    if (p.stage === 'error') toast(`${p.tool} ${p.version} 失败\n${p.message}`, 'err')
+    if (p.stage === 'done') toast(`${p.tool} ${p.version} 安装激活完成`)
+    if (p.stage === 'cancelled') toast(`${p.tool} ${p.version} 已取消`)
+  })
 })
 
 onUnmounted(() => {
   offNavigate()
   offUpdate()
-})
-
-on('status', (list) => { tools.value = list })
-on('install', (p) => {
-  if (p.stage === 'error') toast(`${p.tool} ${p.version} 失败\n${p.message}`, 'err')
-  if (p.stage === 'done') toast(`${p.tool} ${p.version} 安装激活完成`)
-  if (p.stage === 'cancelled') toast(`${p.tool} ${p.version} 已取消`)
+  offStatus()
+  offInstall()
 })
 </script>
 
@@ -549,6 +552,10 @@ on('install', (p) => {
   border-color: rgba(242, 109, 109, 0.4);
 }
 
+.toast.warn {
+  border-color: rgba(229, 180, 84, 0.4);
+}
+
 .toast-dot {
   width: 6px;
   height: 6px;
@@ -559,6 +566,11 @@ on('install', (p) => {
 .toast-dot.err {
   background: var(--danger);
   box-shadow: 0 0 6px var(--danger);
+}
+
+.toast-dot.warn {
+  background: var(--warn);
+  box-shadow: 0 0 6px var(--warn);
 }
 
 @keyframes toastIn {

@@ -78,12 +78,20 @@ func Load() (*Settings, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 先取原始键集合：只有旧配置（checkUpdateOnStart）时按旧值迁移，
+	// 不能因为结构体默认值是 true 就把用户明确关闭过的开关又打开。
+	var raw map[string]json.RawMessage
+	_ = json.Unmarshal(data, &raw)
 	if err := json.Unmarshal(data, s); err != nil {
 		return nil, err
 	}
-	// 兼容迁移：如果设置了 checkUpdateOnStart 但没有显式 autoCheckUpdate
-	if !s.AutoCheckUpdate && s.CheckUpdateOnStart {
-		s.AutoCheckUpdate = s.CheckUpdateOnStart
+	if _, ok := raw["autoCheckUpdate"]; !ok {
+		if v, ok := raw["checkUpdateOnStart"]; ok {
+			var b bool
+			if json.Unmarshal(v, &b) == nil {
+				s.AutoCheckUpdate = b
+			}
+		}
 	}
 	s.CheckUpdateOnStart = s.AutoCheckUpdate
 	for k, v := range DefaultMirrors {

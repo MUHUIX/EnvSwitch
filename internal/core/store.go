@@ -19,11 +19,31 @@ func ListInstalls(ad Adapter, s *settings.Settings) []Install {
 	if ex, ok := ad.(interface{ Adopted(s *settings.Settings) []Install }); ok {
 		out = append(out, ex.Adopted(s)...)
 	}
-	sort.Slice(out, func(i, j int) bool { return CompareVersions(out[i].Version, out[j].Version) > 0 })
+	sortInstalls(out)
 	return out
 }
 
-func scanStore(ad Adapter, s *settings.Settings) []Install {
+// ListInstallsFast 版本条目与 ListInstalls 相同，只是 Size 统一为 -1（不统计目录大小）。
+// 总览页每 3.5 秒轮询一次，若每次递归统计整个版本库会让界面明显发卡。
+func ListInstallsFast(ad Adapter, s *settings.Settings) []Install {
+	out := scanStoreFast(ad, s)
+	if ex, ok := ad.(FastAdopter); ok {
+		out = append(out, ex.AdoptedFast(s)...)
+	} else if ex, ok := ad.(interface{ Adopted(s *settings.Settings) []Install }); ok {
+		out = append(out, ex.Adopted(s)...)
+	}
+	sortInstalls(out)
+	return out
+}
+
+func sortInstalls(out []Install) {
+	sort.Slice(out, func(i, j int) bool { return CompareVersions(out[i].Version, out[j].Version) > 0 })
+}
+
+func scanStore(ad Adapter, s *settings.Settings) []Install { return scanStoreN(ad, s, true) }
+func scanStoreFast(ad Adapter, s *settings.Settings) []Install { return scanStoreN(ad, s, false) }
+
+func scanStoreN(ad Adapter, s *settings.Settings, withSize bool) []Install {
 	dir := settings.ToolStoreDir(s, ad.ID())
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -41,9 +61,13 @@ func scanStore(ad Adapter, s *settings.Settings) []Install {
 		if fi, err := os.Stat(bin); err != nil || !fi.IsDir() {
 			continue // 半残目录不参与列表
 		}
+		size := int64(-1)
+		if withSize {
+			size = DirSize(filepath.Join(dir, e.Name()))
+		}
 		out = append(out, Install{
 			Version: e.Name(), Source: "store", BinDir: bin,
-			Size: DirSize(filepath.Join(dir, e.Name())), Editable: true,
+			Size: size, Editable: true,
 		})
 	}
 	return out
@@ -123,7 +147,12 @@ func NvmRoot() string {
 }
 
 // NvmVersions 列出 nvm-windows 已装 node 版本目录。
-func NvmVersions() []Install {
+func NvmVersions() []Install { return nvmVersions(true) }
+
+// NvmVersionsFast 同上，但不算各版本目录大小（供总览轮询）。
+func NvmVersionsFast() []Install { return nvmVersions(false) }
+
+func nvmVersions(withSize bool) []Install {
 	root := NvmRoot()
 	if root == "" {
 		return nil
@@ -136,9 +165,13 @@ func NvmVersions() []Install {
 	for _, e := range ents {
 		if m := nvmVerDir.FindStringSubmatch(e.Name()); m != nil {
 			dir := filepath.Join(root, e.Name())
+			size := int64(-1)
+			if withSize {
+				size = DirSize(dir)
+			}
 			out = append(out, Install{
 				Version: m[1], Source: "nvm", BinDir: dir,
-				Size: DirSize(dir), Editable: false,
+				Size: size, Editable: false,
 			})
 		}
 	}
@@ -200,7 +233,18 @@ func WhichResolved(exe string) string {
 	candidates := []string{}
 	switch baseNameNoExt {
 	case "git":
-		candidates = append(candidates, `D:\Git\cmd\git.exe`, `C:\Program Files\Git\cmd\git.exe`, `C:\Program Files\Git\bin\git.exe`)
+		if localApp != "" {
+			candidates = append(candidates, filepath.Join(localApp, "Programs", "Git", "cmd", "git.exe"))
+		}
+		// 自定义盘符安装（安装器允许改路径），按常见盘符探测而不是写死某一台机器
+		for _, d := range []string{"C", "D", "E", "F"} {
+			candidates = append(candidates, d+`:\Git\cmd\git.exe`)
+		}
+		candidates = append(candidates,
+			filepath.Join(progFiles, "Git", "cmd", "git.exe"),
+			filepath.Join(progFiles, "Git", "bin", "git.exe"))
+	case "docker":
+		candidates = append(candidates, filepath.Join(progFiles, "Docker", "Docker", "resources", "bin", "docker.exe"))
 	case "nvm":
 		if localApp != "" {
 			candidates = append(candidates, filepath.Join(localApp, "nvm", "nvm.exe"))

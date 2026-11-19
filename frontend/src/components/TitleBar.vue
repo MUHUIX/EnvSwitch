@@ -15,9 +15,20 @@ const emit = defineEmits(['toggle-theme', 'open-settings'])
 
 const isMaximized = ref(false)
 
-function onToggleMaximize() {
+async function syncMaximized() {
+  try {
+    isMaximized.value = await win.isMaximised()
+  } catch (e) {
+    // 浏览器 dev 模式无窗口 API，保持默认
+  }
+}
+
+onMounted(syncMaximized)
+
+async function onToggleMaximize() {
   win.toggleMaximise()
-  isMaximized.value = !isMaximized.value
+  // 窗口状态由系统异步变更，稍后回读，避免图标与真实状态不一致
+  setTimeout(syncMaximized, 120)
 }
 </script>
 
