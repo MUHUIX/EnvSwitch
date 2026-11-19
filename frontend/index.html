@@ -1,9 +1,19 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>EnvSwitch</title>
+  <script>
+    // 首帧防闪：<html> 默认 data-theme="dark"，这里在样式绘制前按已保存的偏好改写一次，
+    // 否则明亮用户每次冷启动都会先看到一屏暗色（App.vue 的 applyTheme 要等 onMounted）。
+    // 存储键与 App.vue 保持一致；万一读不到或键名有变，回落默认值，不影响后续逻辑。
+    try {
+      if (localStorage.getItem('envswitch-theme') === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light')
+      }
+    } catch (e) { /* 隐私模式等场景取不到 localStorage，保持默认暗色 */ }
+  </script>
 </head>
 <body>
   <div id="app"></div>

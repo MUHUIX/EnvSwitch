@@ -25,11 +25,30 @@
   --ok: #3FBFA8;
   --warn: #E5B454;
   --danger: #F26D6D;
+  --info: #6BB1FF;
+
+  /* 状态色半透明套件：*-bg 作提示条/标签的填充，*-line 作同色描边。
+     数值 = 此前散落在各视图里的暗色硬编码 rgba，抽成 token 后暗色观感不变。 */
+  --warn-bg: rgba(229, 180, 84, 0.14);
+  --warn-line: rgba(229, 180, 84, 0.28);
+  --danger-bg: rgba(242, 109, 109, 0.12);
+  --danger-line: rgba(242, 109, 109, 0.30);
+  --info-bg: rgba(84, 150, 229, 0.12);
+  --info-line: rgba(84, 150, 229, 0.28);
+
+  /* 弹层阴影色：注意这是 box-shadow 的「颜色值」，不是整串阴影。
+     用法：box-shadow: 0 20px 44px -16px var(--pop-shadow), … */
+  --pop-shadow: rgba(8, 18, 28, 0.4);
 
   --lamp-off: #3A424B;
   --lamp-idle: #626C76;
 
-  --font-ui: "Segoe UI Variable Text", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  /* 界面字体：思源黑体优先。它的本地家族名很杂（不同安装包各不一样），
+     故 Source Han Sans SC / Noto Sans SC / 思源黑体 / Source Han Sans CN 四个别名并列托底；
+     机器上没装思源黑体时自动回退微软雅黑，不会掉到宋体。 */
+  --font-ui: "Source Han Sans SC", "Noto Sans SC", "思源黑体", "Source Han Sans CN", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  /* 数字字体：主序保持等宽不动（仪表盘的 tabular 对齐靠它），
+     末尾已有通用 monospace 托底，不掺入比例字体以免破坏等宽回归。 */
   --font-num: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -44,38 +63,58 @@
   --shadow-glow: 0 0 14px rgba(63, 191, 168, 0.2);
 }
 
-/* ===== 明亮模式 ===== */
+/* ===== 明亮模式 =====
+   目标是「黑白分明」：文字三级差拉大、分隔线加重、背景分层、状态色压深。
+   下列前景色均按 WCAG AA 校准（对白底 --surface #FFFFFF 的估算见行内注释）。 */
 [data-theme="light"] {
-  --bg: #F4F6F9;
+  /* 背景分层：外圈冷灰 → 面板纯白 → 悬停/浮起更深，避免"一片死白"没有层次 */
+  --bg: #F2F4F7;
   --surface: #FFFFFF;
-  --surface-soft: rgba(0, 0, 0, 0.03);
-  --surface-raised: #EAEFF4;
+  --surface-soft: rgba(11, 16, 23, 0.05);
+  --surface-raised: #E8ECF1;
   --overlay: #FFFFFF;
-  --titlebar-bg: rgba(244, 246, 249, 0.85);
+  --titlebar-bg: rgba(242, 244, 247, 0.86);
 
-  --hairline: rgba(0, 0, 0, 0.08);
-  --hairline-strong: rgba(0, 0, 0, 0.16);
-  --glass-hi: rgba(255, 255, 255, 0.85);
+  /* 分隔线：原来的 0.08/0.16 在白底几乎不可见，加重到能读出结构 */
+  --hairline: rgba(11, 16, 23, 0.14);
+  --hairline-strong: rgba(11, 16, 23, 0.24);
+  --glass-hi: rgba(255, 255, 255, 0.9);
 
-  --ink-1: #1A202C;
-  --ink-2: #4A5568;
-  --ink-3: #718096;
+  /* 文字三级：约 19:1 / 9.6:1 / 5.9:1 —— 12~13px 小字全部过 4.5:1 */
+  --ink-1: #0B1017;
+  --ink-2: #3A4654;
+  --ink-3: #5A6672;
 
+  /* 强调色：图形/描边用 --accent，落到文字必须用更深的 --accent-ink（8.6:1） */
   --accent: #0E9F85;
-  --accent-ink: #076A58;
+  --accent-ink: #04564A;
   --accent-dim: rgba(14, 159, 133, 0.1);
   --accent-line: rgba(14, 159, 133, 0.32);
 
-  --ok: #0E9F85;
-  --warn: #D69E2E;
-  --danger: #E53E3E;
+  /* 状态色：亮底一律压深。--ok 由 #0E9F85（3.3:1）压到 #0B8470（4.6:1），
+     这样同事在正文里写 color: var(--ok) 的小字也能读。
+     --warn 用 #8A5C00（#9A6700 同族压暗一档）：#9A6700 在白面板上是 4.87:1 过关，
+     但落到 --warn-bg 底纹上只剩 4.29:1，再深一档后白底 5.8:1、底纹上 5.1:1 都稳。 */
+  --ok: #0B8470;
+  --warn: #8A5C00;
+  --danger: #C22B2B;
+  --info: #1B6AC9;
 
-  --lamp-off: #CBD5E0;
-  --lamp-idle: #A0AEC0;
+  --warn-bg: rgba(154, 103, 0, 0.10);
+  --warn-line: rgba(154, 103, 0, 0.30);
+  --danger-bg: rgba(194, 43, 43, 0.10);
+  --danger-line: rgba(194, 43, 43, 0.30);
+  --info-bg: rgba(27, 106, 201, 0.10);
+  --info-line: rgba(27, 106, 201, 0.30);
+  --pop-shadow: rgba(15, 23, 42, 0.16);
 
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.05);
-  --shadow-card-hover: 0 6px 18px rgba(0, 0, 0, 0.1), 0 0 1px var(--accent-line);
-  --shadow-btn: 0 1px 2px rgba(0, 0, 0, 0.05);
+  /* 灰点在白底也要看得见：off ≈ 3.5:1、idle ≈ 4.6:1（图形元素按 3:1 判） */
+  --lamp-off: #7E8A96;
+  --lamp-idle: #6B7683;
+
+  --shadow-card: 0 2px 8px rgba(11, 16, 23, 0.06);
+  --shadow-card-hover: 0 6px 18px rgba(11, 16, 23, 0.12), 0 0 1px var(--accent-line);
+  --shadow-btn: 0 1px 2px rgba(11, 16, 23, 0.06);
   --shadow-glow: 0 0 10px rgba(14, 159, 133, 0.15);
 }
 
@@ -219,7 +258,9 @@ input {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #FFFFFF;
+  /* 暗色主题的青绿按钮是浅底（#3FBFA8 亮度≈0.40），白字只有 2.3:1；
+     换成深墨文字后约 8:1。明亮主题在下方覆盖回白字（压深青底 #0A7A68）。 */
+  color: #08161C;
   font-weight: 600;
   box-shadow: 0 2px 8px var(--accent-dim), var(--shadow-glow);
 }
@@ -258,43 +299,79 @@ input {
 
 /* 状态指示灯 */
 .lamp {
+  position: relative;   /* 给 ::after 扩散环当定位参照 */
   width: 7px;
   height: 7px;
   border-radius: 50%;
   flex: none;
   background: var(--lamp-off);
+  /* .lamp 是用 background 上色的（不是 color），所以扩散环的颜色
+     --lamp-c 必须逐状态再给一遍；这里先兜底成"未点亮"灰，
+     万一有漏配状态类的用法，环也不会跑到强调色上。 */
+  --lamp-c: var(--lamp-off);
   transition: all 0.2s var(--ease);
 }
 
 .lamp.ok {
+  --lamp-c: var(--ok);
   background: var(--ok);
   box-shadow: 0 0 8px var(--ok), 0 0 12px rgba(63, 191, 168, 0.4);
   animation: lamp-breathe 3.2s ease-in-out infinite;
 }
 
 .lamp.idle {
+  --lamp-c: var(--lamp-idle);
   background: var(--lamp-idle);
 }
 
+.lamp.off {
+  --lamp-c: var(--lamp-off);
+}
+
 .lamp.up {
+  --lamp-c: var(--warn);
   background: var(--warn);
   box-shadow: 0 0 8px var(--warn), 0 0 12px rgba(229, 180, 84, 0.4);
   animation: lamp-breathe 3.2s ease-in-out infinite;
 }
 
 .lamp.err {
+  --lamp-c: var(--danger);
   background: var(--danger);
   box-shadow: 0 0 8px var(--danger), 0 0 12px rgba(242, 109, 109, 0.4);
   animation: lamp-breathe 3.2s ease-in-out infinite;
 }
 
+/* 雷达扩散环：所有状态点（包括 off / idle 灰点）一起扩散。
+   ::after 绝对定位且无自身尺寸（inset:0 跟着 7px 的点走），在流外，
+   不影响 flex 排布；pointer-events:none 保证不吃点击。 */
+.lamp::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid var(--lamp-c, var(--accent));
+  opacity: 0;
+  animation: lamp-ripple 2.2s var(--ease) infinite;
+  pointer-events: none;
+}
+
+/* 原有呼吸（ok/up/err 的 brightness）与新的扩散环并存：
+   呼吸挂在点上，扩散挂在 ::after 上，两者互不覆盖。 */
 @keyframes lamp-breathe {
   0%, 100% { filter: brightness(1); }
   50% { filter: brightness(1.3); }
 }
 
+@keyframes lamp-ripple {
+  0% { transform: scale(1); opacity: 0.55; }
+  70% { transform: scale(2.6); opacity: 0; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .lamp.ok, .lamp.up, .lamp.err { animation: none; }
+  .lamp::after { animation: none; opacity: 0; }
 }
 
 /* 仪表卡格网 */
@@ -330,3 +407,39 @@ input {
 .gauge-card.dim:hover {
   opacity: 0.95;
 }
+
+/* ===== 明亮主题局部修正 =====
+   下面这些值只在白底成立：暗色那套大光晕 / 半透明直接搬过来会发灰发脏。
+   用 [data-theme="light"] 前缀单独覆盖，暗色的表现一个字节都没动。 */
+
+/* 主按钮：白字压在 --accent(#0E9F85) 上只有 3.3:1，12.5px 撑不住；
+   换成同族深青 #0A7A68 → 白字 5.3:1（悬停只提 1.06 倍亮度，不掉出 AA）。 */
+[data-theme="light"] .btn.primary {
+  background: #0A7A68;
+  border-color: #0A7A68;
+  color: #FFFFFF;
+}
+
+[data-theme="light"] .btn.primary:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 4px 12px var(--accent-dim), 0 0 14px var(--accent-line);
+}
+
+/* 灯点光晕：暗色是"自发光"思路的双层大 glow，白底上收成紧贴点的一层深色微光。 */
+[data-theme="light"] .lamp.ok {
+  box-shadow: 0 0 6px rgba(11, 132, 112, 0.45);
+}
+
+[data-theme="light"] .lamp.up {
+  box-shadow: 0 0 6px rgba(154, 103, 0, 0.4);
+}
+
+[data-theme="light"] .lamp.err {
+  box-shadow: 0 0 6px rgba(194, 43, 43, 0.4);
+}
+
+/* 停用卡片：0.65 不透明度会把 13px 正文一起压到 AA 线下（约 4.2:1），提到 0.78。 */
+[data-theme="light"] .gauge-card.dim {
+  opacity: 0.78;
+}
+

@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,13 +139,55 @@ func siblingName(base string) string {
 	return "EnvSwitch.exe"
 }
 
+// moveOver 把 src 就位为 dst。
+// 同卷优先 os.Rename（原子、零拷贝）；跨卷时 Go 在 Windows 走 MoveFileEx 且不带
+// MOVEFILE_COPY_ALLOWED，会直接报 ERROR_NOT_SAME_DEVICE（更新包暂存在 C:\ 的
+// %LOCALAPPDATA%，程序却可能装在别的盘），因此退化为「复制到 dst 同目录临时文件
+// → 删 dst → 换名就位」。临时文件与 dst 同卷，末次 rename 必然成功；中途任何一步
+// 失败都只留下 .incoming，不会留半个可执行文件在原位。
 func moveOver(src, dst string) error {
-	if _, err := os.Stat(dst); err == nil {
-		if err := os.Remove(dst); err != nil {
-			return err
-		}
+	if err := os.Rename(src, dst); err == nil {
+		return nil
 	}
-	return os.Rename(src, dst)
+	tmp := dst + ".incoming"
+	os.Remove(tmp)
+	if err := copyFile(src, tmp); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	os.Remove(src) // 清掉跨卷复制留下的暂存原件
+	return nil
+}
+
+// copyFile 复制到 dst 并在返回前关闭全部句柄 —— Windows 上句柄未关时源文件删不掉，
+// 因此不能用 defer 把关闭拖到调用方之后。
+func copyFile(src, dst string) error {
+	sf, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	df, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
+	if err != nil {
+		sf.Close()
+		return err
+	}
+	_, cpErr := io.Copy(df, sf)
+	clErr := df.Close()
+	if sfErr := sf.Close(); sfErr != nil && cpErr == nil {
+		cpErr = sfErr
+	}
+	if cpErr != nil {
+		return cpErr
+	}
+	return clErr
 }
 
 // WriteHeartbeat / MarkUpdateGood / SweepOld —— 启动侧三段式：

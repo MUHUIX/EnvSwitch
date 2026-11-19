@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, inject, onMounted, onUnmounted } from 'vue'
+import { ref, watch, computed, inject, onMounted, onUnmounted } from 'vue'
 import { api, on } from '../bridge'
 import Icon from '../components/Icon.vue'
 
@@ -13,7 +13,8 @@ const current = ref(null)
 const loading = ref(false)
 const filter = ref('')
 const installing = ref({}) // ver -> {pct, speed}
-const confirmDel = ref('')
+const confirmDel = ref('') // 待确认卸载的行标识（source|version，同一版本号可能有两行）
+const removingVer = ref('') // 正在卸载的行标识（同一时刻只允许删一个）
 const state = ref('')
 
 let offInstall = () => {}
@@ -58,7 +59,22 @@ async function loadRemote() {
   }
 }
 
-watch(() => props.tool, reload, { immediate: true })
+// 在左侧栏切换工具时，本组件不会重新挂载（App.vue 里只换 props.tool），
+// 右侧「官方可用版本」列表、搜索关键字、索引错误提示、以及上个工具的安装进度
+// 都会残留在新工具页面上。所以换工具时先把这些与工具绑定的视图状态清干净，
+// 再重载本机列表。安装任务仍在后台跑，其完成提示由 App.vue 的 toast 兜底，
+// 这里丢掉的只是当前视图已无意义的进度条。
+function switchTool() {
+  remotes.value = []
+  filter.value = ''
+  state.value = ''
+  installing.value = {}
+  confirmDel.value = ''
+  removingVer.value = ''
+  reload()
+}
+
+watch(() => props.tool, switchTool, { immediate: true })
 
 function shown(list) {
   const f = filter.value.trim().replace(/^v/, '')
@@ -79,6 +95,29 @@ function sourceNote(s) {
   if (isSystemSource(s)) return '系统环境'
   if (s === 'nvm') return 'nvm 收编'
   return '已激活'
+}
+
+// 本机可卸载的行：store 自有版本 + nvm 收编版本；
+// 系统 PATH 探测出来的行只读（不在我们管的目录里，删它等于删用户的系统环境）。
+const removable = computed(() => locals.value.filter(r => !isSystemSource(r.source)))
+
+// 托底：只剩最后一个可卸载版本、且它正是当前生效版本时不许删，
+// 否则本机将没有任何可切换目标（激活 junction 也会被摘掉）。
+function isLastRemovable(r) {
+  return removable.value.length <= 1 && !!r.active
+}
+
+function removeHint(r) {
+  if (isSystemSource(r.source)) return '外部/系统环境不受管，不支持卸载'
+  if (r.source === 'external') return '外部安装目录不受管，不支持卸载'
+  if (isLastRemovable(r)) return '最后一个版本，先安装其他版本再卸载'
+  if (r.active) return '卸载当前生效版本（会自动切到剩余最新）'
+  return '卸载此版本'
+}
+
+// 行标识：同一份安装可能同时以 store 与 nvm 两个入口出现，不能只用版本号区分。
+function rowKey(r) {
+  return `${r.source}|${r.version}`
 }
 
 async function doUse(ver) {
@@ -102,12 +141,27 @@ async function doInstall(ver) {
   }
 }
 
-async function doRemove(ver) {
+async function doRemove(r) {
+  // 兜底断言：入口按钮已禁用，这里再挡一次，防止绕过 UI 删掉不可删的行或最后一个版本
+  if (!r || isSystemSource(r.source) || r.source === 'external') {
+    toast(`${props.tool} ${r ? r.version : ''} 不可卸载（外部/系统环境）`, 'err')
+    confirmDel.value = ''
+    return
+  }
+  if (isLastRemovable(r)) {
+    toast('最后一个版本，先安装其他版本再卸载', 'err')
+    confirmDel.value = ''
+    return
+  }
+  removingVer.value = rowKey(r)
   try {
-    await api.remove(props.tool, ver, true)
-    toast(`已卸载 ${ver}`)
+    // cascade=true：删的正是当前生效版本时，后端摘掉激活链接并自动切到剩余最新
+    await api.remove(props.tool, r.version, true)
+    toast(`已卸载 ${r.version}`)
   } catch (e) {
     toast(String(e), 'err')
+  } finally {
+    removingVer.value = ''
   }
   confirmDel.value = ''
   await reload()
@@ -185,25 +239,36 @@ async function refresh() {
               <span class="size-col num">{{ r.size }}</span>
 
               <div class="action-col">
-                <template v-if="confirmDel === r.version">
-                  <button class="btn sm danger-b" @click="doRemove(r.version)">确认删除</button>
-                  <button class="btn sm ghost" @click="confirmDel = ''">取消</button>
+                <!-- 内联二次确认：非系统行（store 自有 + nvm 收编）一律可卸载，
+                     激活行也可卸，只是文案说明卸完会自动切到剩余最新 -->
+                <template v-if="confirmDel === rowKey(r)">
+                  <button class="btn sm danger-b" :disabled="!!removingVer" @click="doRemove(r)">
+                    {{ removingVer === rowKey(r) ? '卸载中…' : (r.active ? '确认卸载并切换' : '确认删除') }}
+                  </button>
+                  <button class="btn sm ghost" :disabled="!!removingVer" @click="confirmDel = ''">取消</button>
                 </template>
                 <template v-else-if="isSystemSource(r.source)">
                   <span v-if="!r.active" class="ro-tag">系统环境</span>
                 </template>
-                <template v-else-if="!r.active">
-                  <button class="btn sm primary" @click="doUse(r.version)">切换</button>
+                <template v-else>
                   <button
-                    v-if="r.source === 'store'"
-                    class="btn sm ghost icon-only"
-                    title="卸载此版本"
-                    @click="confirmDel = r.version"
+                    v-if="!r.active"
+                    class="btn sm primary"
+                    :disabled="!!removingVer"
+                    @click="doUse(r.version)"
+                  >
+                    切换
+                  </button>
+                  <span v-else-if="r.source !== 'store'" class="ro-tag">收编自 {{ sourceLabel(r.source) }}</span>
+                  <button
+                    class="btn sm ghost icon-only trash-btn"
+                    :disabled="!!removingVer || isLastRemovable(r) || r.source === 'external'"
+                    :title="removeHint(r)"
+                    @click="confirmDel = rowKey(r)"
                   >
                     <Icon name="trash" :size="13" />
                   </button>
                 </template>
-                <span v-else-if="r.source !== 'store'" class="ro-tag">收编自 {{ sourceLabel(r.source) }}</span>
               </div>
             </div>
           </div>
@@ -445,16 +510,34 @@ async function refresh() {
 
 .danger-b {
   color: var(--danger);
-  border-color: rgba(242, 109, 109, 0.3);
+  border-color: var(--danger-line, rgba(242, 109, 109, 0.3));
 }
 
-.danger-b:hover {
-  background: rgba(242, 109, 109, 0.1);
+.danger-b:hover:not([disabled]) {
+  background: var(--danger-bg, rgba(242, 109, 109, 0.1));
+  border-color: var(--danger-line, rgba(242, 109, 109, 0.3));
+}
+
+/* 卸载按钮：常态弱色，hover 转 danger；禁用（系统行/最后一个版本）保持灰且不变形 */
+.trash-btn {
+  color: var(--ink-3);
+}
+
+.trash-btn:hover:not([disabled]) {
+  color: var(--danger);
+  background: var(--danger-bg, rgba(242, 109, 109, 0.1));
+  border-color: var(--danger-line, rgba(242, 109, 109, 0.3));
+}
+
+.trash-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .ro-tag {
   font-size: 11px;
   color: var(--ink-3);
+  white-space: nowrap;
 }
 
 .lts-tag {

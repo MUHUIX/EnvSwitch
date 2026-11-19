@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -29,6 +30,7 @@ type App struct {
 	mu           sync.Mutex
 	updateMu     sync.Mutex // 保护 lastUpdateCheck（后台定时检查与前端查询并发）
 	s            *settings.Settings
+	quitting     atomic.Bool // 本次关闭=真退的一次性内存旗标（托盘退出/热更新重启），不落盘
 	ads          []core.Adapter
 	busy         map[string]context.CancelFunc // tool -> 进行中的安装任务（同工具串行）
 	updateStopCh chan struct{}
@@ -512,13 +514,15 @@ func (a *App) Remove(tool, version string, cascade bool) error {
 	}
 	err := core.RemoveVersion(a.s, ad, version, cascade)
 	a.emitStatus()
-	if err != nil {
-		// “已自动切到”是成功路径上的提示
-		if strings.Contains(err.Error(), "已自动切到") {
-			return nil
-		}
+	if err != nil && !strings.Contains(err.Error(), "已自动切到") {
 		return err
 	}
+	// 走到这里说明目录已真删（“已自动切到”是成功路径上的提示）。
+	// 必须清掉系统版本探测缓存，否则 60 秒内本机列表仍会把刚删掉的版本
+	// 当成“系统环境”行重新显示出来（nvm 收编版本尤其容易命中）。
+	sysDetectCacheMu.Lock()
+	delete(sysDetectCache, tool)
+	sysDetectCacheMu.Unlock()
 	return nil
 }
 
@@ -698,21 +702,25 @@ func (a *App) ApplyUpdate() error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	// 必须标记真退：Quit() 同样走 OnBeforeClose，若不置旗标，closeToTray=true
+	// 时旧进程只隐藏不退，新进程又拿不到单实例锁，热更新会静默失败甚至回滚。
+	a.DisableTrayKeep()
 	go func() { time.Sleep(300 * time.Millisecond); wrt.Quit(a.ctx) }()
 	return nil
 }
 
 func (a *App) Ctx() context.Context { return a.ctx }
 
-func (a *App) CloseToTray() bool { return a.s.CloseToTray }
+// CloseToTray 读取「关闭时最小化到托盘」设置；退出流程中 quitting
+// 一次性旗标覆盖它，保证真退且不污染持久设置。
+func (a *App) CloseToTray() bool { return a.s.CloseToTray && !a.quitting.Load() }
 
 func (a *App) Autostart() bool { return a.s.Autostart }
 
-// DisableTrayKeep 用于托盘"退出"：本次关闭必须真退，忽略 closeToTray。
-func (a *App) DisableTrayKeep() {
-	a.s.CloseToTray = false
-	_ = a.s.Save()
-}
+// DisableTrayKeep 用于托盘"退出"与热更新重启：仅在本次进程把关闭标记为
+// 真退（内存旗标），不改动 closeToTray 设置——旧实现把 false 写盘，导致
+// 托盘退出一次后，下次启动点 × 就永久变成直接关程序。
+func (a *App) DisableTrayKeep() { a.quitting.Store(true) }
 
 // NotifyUpdateAvailable 预留给 M4（更新可用才弹系统通知）。
 func (a *App) NotifyUpdateAvailable() {}

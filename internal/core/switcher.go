@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -266,10 +267,24 @@ func smokeRunJS(ctx context.Context, verDir, entry string, args []string, s *set
 }
 
 // RemoveVersion 删除 store 中版本；当前激活版本必须 cascade（先切走再删）。
+// store 版本库里没有时，退一步尝试删除 nvm 收编目录（见 removeNvmVersion），
+// 外部/系统探测到的版本一律不删。
 func RemoveVersion(s *settings.Settings, ad Adapter, ver string, cascade bool) error {
 	dst := settings.VersionDir(s, ad.ID(), ver)
 	if _, err := os.Stat(dst); err != nil {
-		return W(ErrNotFound, "store 中没有 %s %s", ad.ID(), ver)
+		// 托底：CLI 手打常带 v 前缀（v22.22.0），而 store 目录名是不带前缀的规范版本号。
+		// 先用归一化版本再找一次 store，命中则改用规范名继续走 store 删除分支，
+		// 避免"store 明明有、却因写法不同被推去 nvm 分支"。
+		if norm := NormVersion(ver); norm != ver {
+			if alt := settings.VersionDir(s, ad.ID(), norm); alt != dst {
+				if _, e := os.Stat(alt); e == nil {
+					dst, ver = alt, norm
+				}
+			}
+		}
+	}
+	if _, err := os.Stat(dst); err != nil {
+		return removeNvmVersion(s, ad, ver, cascade)
 	}
 	cur, _, _ := CurrentInstall(ad, s)
 	isActive := cur != nil && cur.Version == ver
@@ -291,6 +306,102 @@ func RemoveVersion(s *settings.Settings, ad Adapter, ver string, cascade bool) e
 			Switch(s, ad, &rest[0])
 			return fmt.Errorf("%s 已删除；已自动切到 %s", ad.ID(), rest[0].Version) // 非致命提示由调用方决定展示
 		}
+	}
+	return nil
+}
+
+// nvmVerDirName nvm-windows 版本目录命名：v22.22.0 / 22.22.0（可带 _1 构建号）。
+var nvmVerDirName = regexp.MustCompile(`^[vV]?\d+\.\d+\.\d+(_\d+)?$`)
+
+// removeNvmVersion 删除 nvm 收编的版本目录（store 分支走不到这里时才调用）。
+// 这是真删目录，所以先过一整套安全托底，任何一条不满足都拒删：
+//  1. NvmRoot() 能解析出来；条目有 BinDir；
+//  2. 目录绝对化 + Clean 后真实存在且是目录；
+//  3. 严格位于 NvmRoot()+`\` 之下，且父目录正好是 NvmRoot()（只删根下第一层的版本目录）；
+//  4. 目录名符合 nvm 版本命名；
+//  5. 目录本身不是 junction/重解析点 —— os.Stat 会顺着链接看到目标，
+//     若这里是个指向别处的链接，RemoveAll 就会删穿到不该删的数据。
+//
+// 激活处理与 store 分支一致：激活版本需 cascade，删除后摘链接并切到剩余最新。
+// 注意：nvm 自身的 settings.txt 不做改动（保守）——删掉版本目录就等于失去可切换目标，
+// nvm 下次列举版本时自然少一项。
+func removeNvmVersion(s *settings.Settings, ad Adapter, ver string, cascade bool) error {
+	want := NormVersion(ver)
+	installs := ListInstalls(ad, s)
+	var hit *Install
+	for i := range installs {
+		if installs[i].Source == "nvm" && NormVersion(installs[i].Version) == want {
+			hit = &installs[i]
+			break
+		}
+	}
+	if hit == nil {
+		return W(ErrNotFound, "版本库与受管目录中没有 %s %s（外部/系统环境不支持卸载）", ad.ID(), ver)
+	}
+
+	root := NvmRoot()
+	if root == "" {
+		return W(ErrUsage, "未找到 nvm 根目录，拒绝删除 %s %s", ad.ID(), ver)
+	}
+	if hit.BinDir == "" {
+		return W(ErrUsage, "nvm 条目没有目录路径，拒绝删除 %s %s", ad.ID(), ver)
+	}
+	abs, err := filepath.Abs(hit.BinDir)
+	if err != nil {
+		return W(ErrUsage, "nvm 目录路径无法解析（%v），拒绝删除", err)
+	}
+	abs = filepath.Clean(abs)
+	absRoot, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return W(ErrUsage, "nvm 根目录路径无法解析（%v），拒绝删除", err)
+	}
+	absRoot = filepath.Clean(absRoot)
+	if fi, e := os.Stat(abs); e != nil || !fi.IsDir() {
+		return W(ErrNotFound, "nvm 目录不存在或不是目录，拒绝删除：%s", abs)
+	}
+	if tgt, _ := sys.ReadJunction(abs); tgt != "" {
+		return W(ErrUsage, "nvm 目录本身是 junction（指向 %s），拒绝删除以免删穿到别处：%s", tgt, abs)
+	}
+	prefix := strings.ToLower(absRoot)
+	if !strings.HasSuffix(prefix, `\`) {
+		prefix += `\`
+	}
+	if !strings.HasPrefix(strings.ToLower(abs), prefix) {
+		return W(ErrUsage, "目标不在 nvm 根目录 %s 之下，拒绝删除：%s", absRoot, abs)
+	}
+	if !strings.EqualFold(filepath.Clean(filepath.Dir(abs)), absRoot) {
+		return W(ErrUsage, "目标不是 nvm 根目录下的版本目录，拒绝删除：%s", abs)
+	}
+	if !nvmVerDirName.MatchString(filepath.Base(abs)) {
+		return W(ErrUsage, "目录名不符合 nvm 版本命名，拒绝删除：%s", filepath.Base(abs))
+	}
+
+	cur, _, _ := CurrentInstall(ad, s)
+	isActive := cur != nil && NormVersion(cur.Version) == want
+	if isActive && !cascade {
+		return W(ErrUsage, "%s %s 正在使用；先切到别的版本，或加 --cascade 一并处理", ad.ID(), ver)
+	}
+	if err := os.RemoveAll(abs); err != nil {
+		return err
+	}
+	if isActive {
+		link := settings.CurrentLink(s, ad.ID())
+		if _, ok := junctionTarget(link); ok {
+			removeLink(link)
+		}
+		// 切到剩余最新（排除刚删掉的这个版本；store 与其余 nvm 目录都算候选）
+		var rest []Install
+		for _, iv := range ListInstalls(ad, s) {
+			if NormVersion(iv.Version) != want {
+				rest = append(rest, iv)
+			}
+		}
+		sort.Slice(rest, func(i, j int) bool { return CompareVersions(rest[i].Version, rest[j].Version) > 0 })
+		if len(rest) > 0 {
+			Switch(s, ad, &rest[0])
+			return fmt.Errorf("%s 已删除；已自动切到 %s", ad.ID(), rest[0].Version) // 非致命提示由调用方决定展示
+		}
+		// 没有剩余版本：保持链接已移除的现状（等同未激活）
 	}
 	return nil
 }

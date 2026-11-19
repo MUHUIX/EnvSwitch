@@ -234,26 +234,57 @@ async function onToggleMaximize() {
 }
 
 .update-dot {
+  /* 骑在按钮右上角边缘（徽标常规位），不再压住齿轮图标 */
   position: absolute;
-  top: 3px;
-  right: 3px;
+  top: -2px;
+  right: -2px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: #ff3b30;
   box-shadow: 0 0 6px rgba(255, 59, 48, 0.8);
-  animation: pulse-dot 2s infinite ease-in-out;
+  /* 点本体保持稳定，扩散交给 ::after 的雷达环（与全局 .lamp / 侧栏红点同一套语言） */
   pointer-events: none;
 }
 
-@keyframes pulse-dot {
-  0%, 100% {
+/* 与全局 .lamp 同一套「雷达扩散」语言：状态点一律有环。
+   ::after 绝对定位在流外，不改按钮布局、不吃点击。
+   环的最大直径压到 1.9 倍（.lamp 用 2.6），避免这个贴窗角的徽标溢出标题栏。 */
+.update-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid #ff3b30;
+  opacity: 0;
+  animation: tb-ripple 2.2s var(--ease, ease-out) infinite;
+  pointer-events: none;
+}
+
+/* keyframes 名带 tb- 前缀，防止与全局/其它组件的动画重名互相覆盖 */
+@keyframes tb-ripple {
+  0% {
     transform: scale(1);
-    box-shadow: 0 0 4px #ff3b30;
+    opacity: 0.6;
   }
-  50% {
-    transform: scale(1.25);
-    box-shadow: 0 0 8px #ff453a, 0 0 12px rgba(255, 59, 48, 0.4);
+  70% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-dot {
+    animation: none;
+  }
+
+  .update-dot::after {
+    animation: none;
+    opacity: 0;
   }
 }
 
@@ -316,5 +347,21 @@ async function onToggleMaximize() {
 
 .win-btn.win-close:hover svg {
   stroke: #ff5c5c;
+}
+
+/* ===== 明亮主题局部修正 =====
+   暗色那套「红底 + 亮红描边」搬到白面板上，关闭图标的对比只有 2.3:1（图形元素要求 3:1），
+   所以在明亮主题换成浅红底 + 深红笔画；暗色表现保持原样。 */
+[data-theme="light"] .win-btn.win-close:hover {
+  background: rgba(194, 43, 43, 0.12);
+}
+
+[data-theme="light"] .win-btn.win-close:hover svg {
+  stroke: #C22B2B;
+}
+
+/* 标题栏内高光：白底上用纯白 inset 高光是"无效果"，改成更淡的分隔感 */
+[data-theme="light"] .titlebar {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 10px rgba(11, 16, 23, 0.06);
 }
 </style>

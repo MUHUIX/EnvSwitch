@@ -317,7 +317,7 @@ const warnCount = computed(() =>
 
 .warn-pill {
   padding: 1px 6px;
-  background: rgba(229, 180, 84, 0.16);
+  background: var(--warn-bg, rgba(229, 180, 84, 0.16));
   color: var(--warn);
   border-radius: 999px;
   font-size: 10.5px;
@@ -381,7 +381,7 @@ const warnCount = computed(() =>
 }
 
 .gauge-card.active {
-  border-color: rgba(63, 191, 168, 0.22);
+  border-color: var(--accent-line);
 }
 
 .gauge-card.dim {
@@ -454,23 +454,26 @@ const warnCount = computed(() =>
   color: var(--ink-3);
   font-family: var(--font-num);
   line-height: 1.2;
+  /* 标签不参与收缩：把挤压让给版本号（否则长版本号会把整行顶出弹层宽度） */
+  flex: none;
+  white-space: nowrap;
 }
 
 .src-tag.nvm {
-  background: rgba(63, 191, 168, 0.12);
-  border-color: rgba(63, 191, 168, 0.3);
+  background: var(--accent-dim);
+  border-color: var(--accent-line);
   color: var(--accent-ink);
 }
 
 .src-tag.系统, .src-tag.system, .src-tag.detected {
-  background: rgba(84, 150, 229, 0.12);
-  border-color: rgba(84, 150, 229, 0.28);
-  color: #6bb1ff;
+  background: var(--info-bg, rgba(84, 150, 229, 0.12));
+  border-color: var(--info-line, rgba(84, 150, 229, 0.28));
+  color: var(--info, #6bb1ff);
 }
 
 .src-tag.store {
-  background: rgba(229, 180, 84, 0.12);
-  border-color: rgba(229, 180, 84, 0.28);
+  background: var(--warn-bg, rgba(229, 180, 84, 0.12));
+  border-color: var(--warn-line, rgba(229, 180, 84, 0.28));
   color: var(--warn);
 }
 
@@ -565,7 +568,7 @@ const warnCount = computed(() =>
   border-radius: 12px;
   /* 两层阴影：黑色层服务暗色主题，冷色层在亮色主题里更有纵深 */
   box-shadow:
-    0 20px 44px -16px rgba(8, 18, 28, 0.4),
+    0 20px 44px -16px var(--pop-shadow, rgba(8, 18, 28, 0.4)),
     0 4px 14px rgba(0, 0, 0, 0.2),
     inset 0 1px 0 var(--glass-hi);
   backdrop-filter: blur(20px) saturate(1.5);
@@ -657,6 +660,10 @@ const warnCount = computed(() =>
   gap: 2px;
   max-height: 264px;
   overflow-y: auto;
+  /* 弹层定宽 216px：长版本号只做省略号，绝不横向溢出（否则底部会冒出横向滚动条） */
+  overflow-x: hidden;
+  /* 溢出裁剪在 padding 盒边缘：预留 2px，正好容纳 hover 的 translateX(2px) 不被切角 */
+  padding-right: 2px;
 }
 
 .pop-list::-webkit-scrollbar {
@@ -666,6 +673,12 @@ const warnCount = computed(() =>
 .pop-list::-webkit-scrollbar-thumb {
   background: var(--hairline-strong);
   border-radius: 999px;
+}
+
+/* 兜底：彻底隐藏可能出现的横向滚动条 */
+.pop-list::-webkit-scrollbar:horizontal {
+  display: none;
+  height: 0;
 }
 
 .pop-item {
@@ -678,6 +691,9 @@ const warnCount = computed(() =>
   gap: 8px;
   font-size: 11.5px;
   color: var(--ink-2);
+  /* flex 子项必须允许收缩到内容宽度以下，长版本号才会走省略号而不是撑破弹层 */
+  min-width: 0;
+  max-width: 100%;
   /* 逐条错峰入场，只动 opacity/transform */
   animation: itemIn 0.2s var(--ease) backwards;
   animation-delay: calc(var(--i, 0) * 20ms);
@@ -737,6 +753,10 @@ const warnCount = computed(() =>
 
 .ver-label {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   text-align: left;
   font-size: 12px;
   letter-spacing: -0.01em;

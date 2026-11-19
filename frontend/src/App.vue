@@ -36,6 +36,19 @@ const GROUPS = [
   ['cloud', '云原生与运维']
 ]
 
+// 侧栏折叠时分组头显示的代表图标（分组 id → icons.js 线性图标名）
+const GROUP_ICON = {
+  runtime: 'group-runtime',
+  packages: 'group-packages',
+  enterprise: 'group-enterprise',
+  cloud: 'group-cloud'
+}
+
+// 托底：映射缺失时退回通用四宫格图标，避免出现空 svg
+function groupIcon(gid) {
+  return GROUP_ICON[gid] ?? 'dash'
+}
+
 // 分组展开/锁起状态持久化：默认全部展开（未记录或为false即为展开）
 const groupCollapsedMap = ref({})
 try {
@@ -185,6 +198,7 @@ onUnmounted(() => {
               @click="toggleGroup(g.id)"
               :title="!collapsed ? (isGroupCollapsed(g.id) ? '点击展开' : '点击收起') : g.label"
             >
+              <!-- 展开态：标题 + 计数 + 箭头；折叠态：居中的代表图标按钮（整行仍可点击收起/展开分组） -->
               <template v-if="!collapsed">
                 <span class="group-title">{{ g.label }}</span>
                 <div class="group-right">
@@ -194,7 +208,10 @@ onUnmounted(() => {
                   </svg>
                 </div>
               </template>
-              <span v-else class="sec-line"></span>
+              <span v-else class="group-chip">
+                <Icon :name="groupIcon(g.id)" :size="16" class="group-icon" />
+                <span class="group-chip-dot"></span>
+              </span>
             </div>
             <div class="toollist-wrap" :class="{ 'is-hidden': isGroupCollapsed(g.id) }">
               <div class="toollist">
@@ -389,7 +406,6 @@ onUnmounted(() => {
   border-radius: 50%;
   background: #ff3b30;
   box-shadow: 0 0 6px rgba(255, 59, 48, 0.8);
-  animation: pulse-dot 2s infinite ease-in-out;
   pointer-events: none;
 }
 
@@ -398,14 +414,29 @@ onUnmounted(() => {
   right: 14px;
 }
 
-@keyframes pulse-dot {
-  0%, 100% {
+/* 雷达式扩散：中心点不动，同色圆环从原位向外扩散淡出 */
+.rail-update-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid #ff3b30;
+  opacity: 0.75;
+  pointer-events: none;
+  animation: rail-dot-ripple 1.9s ease-out infinite;
+}
+
+@keyframes rail-dot-ripple {
+  0% {
     transform: scale(1);
-    box-shadow: 0 0 4px #ff3b30;
+    opacity: 0.75;
   }
-  50% {
-    transform: scale(1.25);
-    box-shadow: 0 0 8px #ff453a, 0 0 12px rgba(255, 59, 48, 0.4);
+  70% {
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.9);
+    opacity: 0;
   }
 }
 
@@ -433,6 +464,45 @@ onUnmounted(() => {
 .group-header:hover {
   background: var(--surface-raised);
   color: var(--ink-1);
+}
+
+/* ===== 折叠态分组头：居中代表图标按钮（不再是一条空白分隔线） ===== */
+.rail.collapsed .group-header {
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  margin-top: 8px;
+}
+
+.group-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+}
+
+/* 分组被收起：图标压暗 + 右下角 2px 状态点提示「此组已收起」 */
+.rail.collapsed .group-header.is-collapsed .group-icon {
+  opacity: 0.5;
+}
+
+.group-chip-dot {
+  position: absolute;
+  right: 4px;
+  bottom: 5px;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s var(--ease);
+}
+
+.rail.collapsed .group-header.is-collapsed .group-chip-dot {
+  opacity: 1;
 }
 
 .group-title {
@@ -484,12 +554,7 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-.sec-line {
-  display: block;
-  height: 1px;
-  background: var(--hairline);
-  margin: 6px 4px;
-}
+/* .sec-line 分隔线已停用：折叠态分组头改渲染 group-chip 图标按钮 */
 
 .toollist {
   display: flex;
@@ -580,20 +645,60 @@ onUnmounted(() => {
 }
 
 .toast-dot {
+  position: relative;
+  flex: none;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
+  /* currentColor 与自身底色同步，扩散环在暗/亮两主题都可见 */
+  color: var(--accent);
 }
 
 .toast-dot.err {
   background: var(--danger);
+  color: var(--danger);
   box-shadow: 0 0 6px var(--danger);
 }
 
 .toast-dot.warn {
   background: var(--warn);
+  color: var(--warn);
   box-shadow: 0 0 6px var(--warn);
+}
+
+/* 雷达式扩散：点本身不动，同色圆环原位向外淡出 */
+.toast-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  opacity: 0.7;
+  pointer-events: none;
+  animation: toast-ripple 1.9s ease-out infinite;
+}
+
+@keyframes toast-ripple {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  70% {
+    opacity: 0;
+  }
+  100% {
+    transform: scale(3);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-update-dot::after,
+  .toast-dot::after {
+    animation: none;
+    opacity: 0;
+  }
 }
 
 @keyframes toastIn {
