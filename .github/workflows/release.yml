@@ -99,7 +99,7 @@ jobs:
             notes_zh = $notes
             assets  = @{
               "windows/amd64" = @{
-                url    = "https://github.com/HUIdada1/EnvSwitch/releases/download/$tag/EnvSwitch-win-x64.zip"
+                url    = "https://github.com/${{ github.repository }}/releases/download/$tag/EnvSwitch-win-x64.zip"
                 sha256 = $sha
                 size   = (Get-Item $zip).Length
               }
