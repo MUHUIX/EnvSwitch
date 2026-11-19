@@ -174,7 +174,7 @@ async function refresh() {
             </div>
             <div
               v-for="r in locals"
-              :key="r.source + r.version"
+              :key="r.source + r.version + r.binDir"
               class="v-row"
               :class="{ 'is-active': r.active }"
             >

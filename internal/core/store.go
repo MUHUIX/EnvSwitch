@@ -293,6 +293,28 @@ func WhichResolved(exe string) string {
 	return ""
 }
 
+// NormVersion 比对用的最小规范化：去空白与 v 前缀，使 "v16.20.2" 与 "16.20.2" 视为同一个值。
+func NormVersion(v string) string {
+	return strings.TrimPrefix(strings.TrimSpace(v), "v")
+}
+
+// IndexOfVersion 返回 installs 中第一条版本等于 ver 的下标，没有则 -1。
+// 同一份安装常有多个入口：nvm 的 PATH 链接 C:\nvm4w\nodejs 是指回版本目录
+// E:\nvm\v16.20.2 的符号链接，两条路径同一个版本号。凡是要把"PATH 上检测到的
+// 生效版本"并入已装列表的场合，都必须先用它认出这条已存在的记录，否则会重复成两行。
+func IndexOfVersion(installs []Install, ver string) int {
+	want := NormVersion(ver)
+	if want == "" {
+		return -1
+	}
+	for i := range installs {
+		if NormVersion(installs[i].Version) == want {
+			return i
+		}
+	}
+	return -1
+}
+
 // CompareVersions 语义化点分数字版本比较（可带前缀 v、可带构建号 20241002）。
 func CompareVersions(a, b string) int {
 	pa, pb := splitVer(a), splitVer(b)

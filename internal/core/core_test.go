@@ -41,6 +41,29 @@ func TestCompareAndMatch(t *testing.T) {
 	}
 }
 
+func TestNormAndIndexOfVersion(t *testing.T) {
+	if NormVersion(" v16.20.2 ") != "16.20.2" || NormVersion("16.20.2") != "16.20.2" {
+		t.Fatalf("规范化失败: %q", NormVersion(" v16.20.2 "))
+	}
+	// 收编列表里已有 16.20.2，PATH 检测到的同版本必须命中它（下标 1），不能再追加一行
+	installs := []Install{
+		{Version: "22.22.0", Source: "nvm"},
+		{Version: "16.20.2", Source: "nvm", BinDir: `E:\nvm\v16.20.2`},
+	}
+	if i := IndexOfVersion(installs, "v16.20.2"); i != 1 {
+		t.Fatalf("v 前缀应命中同一条: got %d", i)
+	}
+	if i := IndexOfVersion(installs, "16.20.2"); i != 1 {
+		t.Fatalf("精确应命中: got %d", i)
+	}
+	if i := IndexOfVersion(installs, "20.19.0"); i != -1 {
+		t.Fatalf("未安装应返回 -1: got %d", i)
+	}
+	if i := IndexOfVersion(installs, ""); i != -1 || IndexOfVersion(installs, "20") != -1 {
+		t.Fatal("空串与 major 别名不算同一条（否则 20.x 会被误合并）")
+	}
+}
+
 func TestShimScriptStable(t *testing.T) {
 	s := shimScript("npm", "bin/npm-cli.js")
 	for _, want := range []string{`@ECHO off`, `%ES%\current\npm\bin/npm-cli.js`, `"%NODE%"`, `EXIT /B 78`, `GOTO :envs_missing`} {

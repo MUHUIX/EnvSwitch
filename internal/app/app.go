@@ -318,21 +318,32 @@ func (a *App) Local(tool string) ([]RowView, error) {
 	installs := core.ListInstalls(ad, a.s)
 	out := make([]RowView, 0, len(installs)+1)
 	for _, iv := range installs {
-		active := cur != nil && cur.Version == iv.Version
+		active := cur != nil && core.NormVersion(cur.Version) == core.NormVersion(iv.Version)
 		out = append(out, RowView{
 			Version: iv.Version, Source: iv.Source, Size: core.HumanSize(iv.Size),
 			BinDir: iv.BinDir, Active: active,
 		})
 	}
-	// 系统里实际生效的版本（不在版本库）追加为只读行
+	// 系统里实际生效的版本追加为只读行 —— 但只在版本库里没有它的时候。
+	// 同一份安装往往有两个入口（nvm 的 C:\nvm4w\nodejs 是指回 E:\nvm\v16.20.2 的
+	// 符号链接），照单全收会让界面上同一个版本出现两行。
 	if sysVer, sysSrc, binDir := a.detectActiveSystemVersion(ad); sysVer != "" {
-		out = append(out, RowView{
-			Version: sysVer,
-			Source:  sysSrc,
-			Size:    "-",
-			BinDir:  binDir,
-			Active:  cur == nil,
-		})
+		if i := core.IndexOfVersion(installs, sysVer); i >= 0 {
+			// 已有这一行：没走 EnvSwitch 激活时，生效的就是它，把状态补上去
+			if cur == nil {
+				out[i].Active = true
+			}
+		} else {
+			out = append(out, RowView{
+				Version: sysVer,
+				Source:  sysSrc,
+				Size:    "-",
+				// BinDir 的契约是「junction 应指向的目录」（见 core.Adapter），
+				// 探测给出的是 exe 全路径，这里取所在目录，避免被当作切换目标。
+				BinDir: filepath.Dir(binDir),
+				Active: cur == nil,
+			})
+		}
 	}
 	return out, nil
 }
