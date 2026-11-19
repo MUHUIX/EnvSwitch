@@ -16,7 +16,7 @@ import (
 // 安全边界：仅 HTTPS + sha256；不删 .old 前任何一步都可回滚。
 
 const (
-	defaultRepo    = "HUIdada1/EnvSwitch"
+	defaultRepo    = "MUHUIX/EnvSwitch"
 	defaultRawHost = "https://raw.githubusercontent.com"
 	updateHeartbeat = "update\\heartbeat"
 	updateOldSuffix = ".old"

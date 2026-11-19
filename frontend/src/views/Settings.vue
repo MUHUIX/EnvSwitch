@@ -90,7 +90,7 @@ async function toggleField(name) {
 
 // 反馈跳转：用系统默认浏览器打开 GitHub 的 issue 表单——应用内打开拿不到 GitHub
 // 登录态，也没法提交表单；模板已在仓库 .github/ISSUE_TEMPLATE 下预设好，填完直接提交。
-const REPO = 'https://github.com/HUIdada1/EnvSwitch'
+const REPO = 'https://github.com/MUHUIX/EnvSwitch'
 
 function submitFeedback() {
   openExternal(`${REPO}/issues/new?template=bug_report.yml`)
@@ -409,7 +409,7 @@ const mirrorOpts = {
                   <a
                     class="repo-link"
                     href="javascript:void(0)"
-                    @click="openExternal('https://github.com/HUIdada1/EnvSwitch')"
+                    @click="openExternal('https://github.com/MUHUIX/EnvSwitch')"
                   >
                     GitHub 源码仓库
                   </a>

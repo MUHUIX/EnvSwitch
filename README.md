@@ -4,7 +4,7 @@
 
 Windows 上的开发环境版本管理桌面应用。把 node、python、go、java 等工具的版本统一收进独立版本库，界面上点一下就切换，不写系统级 PATH，不需要管理员权限。
 
-MIT License + 附加使用条款（复合授权）· 作者 [沐晖](https://github.com/HUIdada1)
+MIT License + 附加使用条款（复合授权）· 作者 [沐晖](https://github.com/MUHUIX)
 
 > 下载、安装或使用前，请先完整阅读[使用声明](#使用声明)与 [License](#license)。本项目**不是纯粹的 MIT 项目**。
 
@@ -57,7 +57,7 @@ PATH 里只插入五条：`current\node`、`current\python`、`current\go`、`bi
 
 ## 安装
 
-从 [Releases](https://github.com/HUIdada1/EnvSwitch/releases) 取用：
+从 [Releases](https://github.com/MUHUIX/EnvSwitch/releases) 取用：
 
 | 文件 | 用途 |
 |------|------|
@@ -75,7 +75,7 @@ envs use node 22            # 切换（毫秒级重指 junction），顺带首�
 envs doctor                 # 体检：PATH 顺序、链接健康、共存冲突、WebView2
 ```
 
-各版本改了什么见 [releases/](releases/) 目录与 [Releases 页面](https://github.com/HUIdada1/EnvSwitch/releases)。
+各版本改了什么见 [releases/](releases/) 目录与 [Releases 页面](https://github.com/MUHUIX/EnvSwitch/releases)。
 
 ## 命令行
 
@@ -116,15 +116,15 @@ GUI 基于 Wails v2 + Vue 3，窗口自绘标题栏，关闭默认缩到托盘�
 .\build.ps1 -Gui      # 只构建 EnvSwitch.exe
 ```
 
-产物在 `build\bin\`。手动构建的话，先 `cd frontend && npm install && npm run build`，因为 GUI 的 Go 代码会 embed `frontend/dist`；然后 `go build ./cmd/envs` 出 CLI，`go build -tags production -ldflags "-H=windowsgui" -o build\bin\EnvSwitch.exe .` 出 GUI（不需要装 wails 命令行）。版本号通过 `-X github.com/HUIdada1/envswitch/internal/core.Version=vX.Y.Z` 注入。
+产物在 `build\bin\`。手动构建的话，先 `cd frontend && npm install && npm run build`，因为 GUI 的 Go 代码会 embed `frontend/dist`；然后 `go build ./cmd/envs` 出 CLI，`go build -tags production -ldflags "-H=windowsgui" -o build\bin\EnvSwitch.exe .` 出 GUI（不需要装 wails 命令行）。版本号通过 `-X github.com/HUIdada1/envswitch/internal/core.Version=vX.Y.Z` 注入。module 路径仍是账号改名前的 `HUIdada1/envswitch`：它只是编译期符号前缀，不影响本地构建与发布；真要改，必须同步 `go.mod`、全部 import 以及 `build.ps1` / `.github/workflows/release.yml` 里的 `-X` 路径，漏掉任何一处，版本号会静默退回 `dev`。
 
 前端单独开发用 `wails dev`，有热更新。
 
 ## 帮助
 
 - `envs --help` / `envs <command> --help`：命令行全部用法
-- [Issues](https://github.com/HUIdada1/EnvSwitch/issues)：问题反馈
-- [Releases](https://github.com/HUIdada1/EnvSwitch/releases)：版本说明与下载
+- [Issues](https://github.com/MUHUIX/EnvSwitch/issues)：问题反馈
+- [Releases](https://github.com/MUHUIX/EnvSwitch/releases)：版本说明与下载
 
 ## 使用声明
 
@@ -155,7 +155,7 @@ OpenJS Foundation 及 Node.js，npm, Inc. 及 npm / npx，Microsoft 及 Windows 
 
 上述禁止事项同时写入 [LICENSE](./LICENSE) 第二部分的「附加使用条款」，构成本项目授权与使用约定的一部分，**不是仅作呼吁**；违反者属超出授权范围，作者保留主张权利的一切权利。
 
-如需在生产环境或商业场景中使用，请先通过 1439078547@qq.com 或 [GitHub](https://github.com/HUIdada1) 联系作者取得书面授权。
+如需在生产环境或商业场景中使用，请先通过 1439078547@qq.com 或 [GitHub](https://github.com/MUHUIX) 联系作者取得书面授权。
 
 ### 三、环境操作与数据风险
 
@@ -193,6 +193,6 @@ EnvSwitch 会真实改动你的系统环境和磁盘内容，请在使用前理�
 
 两部分**不可分割**，共同构成本项目完整的授权与使用约定；仅接受其中一部分者，不得以任何形式使用、复制、修改或分发本项目。附加条款与上文[使用声明](#使用声明)第二节「禁止用途」一致，如表述有出入以 [LICENSE](./LICENSE) 为准。
 
-商业场景使用须事先联系作者另行取得书面授权（1439078547@qq.com 或 [GitHub](https://github.com/HUIdada1)）。第三方组件许可与商标归属见 [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md)。
+商业场景使用须事先联系作者另行取得书面授权（1439078547@qq.com 或 [GitHub](https://github.com/MUHUIX)）。第三方组件许可与商标归属见 [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md)。
 
 Copyright (c) 2026 沐晖 (Muhui)

@@ -74,4 +74,4 @@ cd frontend && npm ls --all                     # 全部前端依赖
 npx license-checker --summary                   # 前端许可汇总
 ```
 
-发现遗漏或标注有误，请提 [Issue](https://github.com/HUIdada1/EnvSwitch/issues)。
+发现遗漏或标注有误，请提 [Issue](https://github.com/MUHUIX/EnvSwitch/issues)。

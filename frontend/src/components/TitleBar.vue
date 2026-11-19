@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { win, openExternal } from '../bridge'
 import Icon from './Icon.vue'
 
-const REPO = 'https://github.com/HUIdada1/EnvSwitch'
+const REPO = 'https://github.com/MUHUIX/EnvSwitch'
 
 const props = defineProps({
   ver: { type: String, default: 'v1.0.0' },
