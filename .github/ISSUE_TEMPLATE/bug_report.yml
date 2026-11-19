@@ -1,0 +1,79 @@
+name: 🐞 问题反馈
+description: 版本装不上 / 切换没生效 / 报错 / 界面异常
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### 填之前先看三眼
+
+        下面字段除「你做了什么，看到什么」外都是**选填**，但填得越全，能直接动手修的概率越高。
+
+        - **标题写成「哪个工具 / 板块 + 什么现象」**，例如「node：切到 22.22.0 后新开终端仍是 20.x」。
+          只写「报错了」的话，看的人连是哪个工具、哪种装法都判断不了。
+        - **一条 issue 只报一件事**，两个不相干的问题请分开提。
+        - **凭证一律打码**：代理密码、Token、API Key 都不要贴。
+
+  - type: dropdown
+    id: module
+    attributes:
+      label: 哪个板块 / 工具
+      options:
+        - 语言运行时（node / python / go / rust / php / deno / bun）
+        - 包管理与工具链（npm / pnpm / yarn / pip / nvm / uv / git）
+        - 企业运行时 JVM 与 .NET（java / maven / gradle / dotnet）
+        - 云原生与运维（docker / kubectl / terraform / redis）
+        - 网络代理（Clash 同步 / 节点测试 / 系统代理）
+        - 界面与设置（主题 / 侧边栏 / 镜像源 / 更新）
+        - 安装与升级（安装包 / 自动更新 / 起不来）
+        - 其它 / 说不清是哪个
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本号
+      description: 看「系统设置 → 软件更新」里 EnvSwitch 客户端当前版本
+      placeholder: 1.0.0
+
+  - type: input
+    id: env
+    attributes:
+      label: 系统 / 运行环境
+      description: Windows 版本；涉及某个工具时把工具自身版本与安装来源（EnvSwitch 装的 / 系统自带 / 别的版本管理器）一并写上
+      placeholder: Windows 11 24H2，node 22.22.0 由 EnvSwitch 安装
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 你做了什么，看到什么
+      description: |
+        尽量按「点哪里 → 出现什么」分步写，能必现最好。报错原文请用三个反引号包起来，免得被 Markdown 吃掉格式：
+
+        ```
+        像这样
+        ```
+      placeholder: |
+        1. 打开「环境总览」，选中 node
+        2. 在版本列表点 22.22.0 的「切换」
+        3. 提示成功，但新开 PowerShell 里 node -v 仍是 20.19.0
+
+        ```
+        把报错原文贴在这里
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 你期望的结果
+      description: 同一操作在别的机器 / 别的版本上是不是正常的？正常时是什么表现？
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 其它补充
+      description: 截图、已经试过什么、什么情况下反而是好的（例如换终端就正常、管理员身份运行后正常）

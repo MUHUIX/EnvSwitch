@@ -88,6 +88,14 @@ async function toggleField(name) {
   await setKv(name, st.value[name])
 }
 
+// 反馈跳转：用系统默认浏览器打开 GitHub 的 issue 表单——应用内打开拿不到 GitHub
+// 登录态，也没法提交表单；模板已在仓库 .github/ISSUE_TEMPLATE 下预设好，填完直接提交。
+const REPO = 'https://github.com/HUIdada1/EnvSwitch'
+
+function submitFeedback() {
+  openExternal(`${REPO}/issues/new?template=bug_report.yml`)
+}
+
 const mirrorOpts = {
   node: ['npmmirror', 'official'],
   npm: ['npmmirror', 'official'],
@@ -336,6 +344,28 @@ const mirrorOpts = {
               </div>
               <div class="cfg-ctrl">
                 <span class="size-pill num">{{ st.totalSize || '0 B' }}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 反馈与需求 -->
+        <section class="cfg-group">
+          <div class="group-header">
+            <h4 class="group-title">反馈与需求</h4>
+          </div>
+
+          <div class="cfg-panel">
+            <div class="cfg-row">
+              <div class="cfg-info">
+                <span class="cfg-label">问题反馈</span>
+                <span class="cfg-desc">功能异常、报错、版本切换不生效、界面错位等，均可在 GitHub 提交问题单</span>
+              </div>
+              <div class="cfg-ctrl">
+                <button class="btn sm ghost" @click="submitFeedback">
+                  <Icon name="github" :size="13" />
+                  <span>提交反馈</span>
+                </button>
               </div>
             </div>
           </div>

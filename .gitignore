@@ -31,6 +31,7 @@ Thumbs.db
 
 # 本地文档与交接材料（禁止入库、禁止推送）
 /docs/
+/design/
 AI_HANDOVER_*.md
 
 # 主题 Logo 生成脚本产出的根目录副本（正式资源在 frontend/public）

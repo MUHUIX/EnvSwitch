@@ -31,8 +31,12 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_RUN "$INSTDIR\EnvSwitch.exe"
-!define MUI_FINISHPAGE_RUN_TEXT "启动 EnvSwitch 并开启开机自启"
-!define MUI_FINISHPAGE_RUN_FUNCTION "LaunchAndAutostart"
+!define MUI_FINISHPAGE_RUN_TEXT "运行 EnvSwitch"
+!define MUI_FINISHPAGE_RUN_FUNCTION "LaunchEnvSwitch"
+; 第二个复选框：借 SHOWREADME 槽位实现独立的开机自启选项，默认勾选
+!define MUI_FINISHPAGE_SHOWREADME ""
+!define MUI_FINISHPAGE_SHOWREADME_TEXT "开机自动启动 EnvSwitch"
+!define MUI_FINISHPAGE_SHOWREADME_FUNCTION "EnableAutostart"
 !insertmacro MUI_PAGE_FINISH
 
 ; —— 卸载页 ——
@@ -41,8 +45,11 @@ SetCompressor /SOLID lzma
 
 !insertmacro MUI_LANGUAGE "SimpChinese"
 
-Function LaunchAndAutostart
+Function EnableAutostart
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "EnvSwitch" '"$INSTDIR\EnvSwitch.exe" --tray'
+FunctionEnd
+
+Function LaunchEnvSwitch
   Exec '"$INSTDIR\EnvSwitch.exe" --tray'
 FunctionEnd
 

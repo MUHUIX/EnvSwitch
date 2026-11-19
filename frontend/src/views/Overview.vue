@@ -8,6 +8,9 @@ const tools = inject('tools')
 const toast = inject('toast')
 
 const pop = ref(null) // { tool, rows }
+const popUp = ref(false) // 下方空间不足时，弹层朝上展开
+const popLeft = ref(false) // 右对齐会顶出可视区时，改为左对齐
+const scrollPane = ref(null)
 const doctors = ref([])
 const flip = ref('')
 const upd = ref({ available: false })
@@ -91,10 +94,24 @@ async function applyUpdate() {
   }
 }
 
-async function openPop(t) {
+const POP_W = 216
+
+async function openPop(t, ev) {
+  // 同步取几何：await 之后 event.currentTarget 会被回收
+  const card = ev?.currentTarget?.closest?.('.gauge-card')
+  const rect = card ? card.getBoundingClientRect() : null
+  const bound = scrollPane.value?.getBoundingClientRect()
   try {
     const rows = await api.local(t.id)
     pop.value = { tool: t.id, rows: rows || [] }
+    // 弹层高度：头部 + 条目（列表最多 264px）+ 内边距
+    const need = Math.min(pop.value.rows.length, 8) * 30 + 96
+    // 下缘越过滚动区底部时朝上展开（顶部要避开滚动区自身的上边界）
+    const bottomEdge = bound ? bound.bottom - 4 : window.innerHeight - 12
+    const topEdge = bound ? bound.top + 4 : 12
+    popUp.value = !!rect && rect.bottom + need > bottomEdge && rect.top - need > topEdge
+    // 右对齐时左缘会越过滚动区可视左边界（左侧溢出不可滚动，会被裁掉）
+    popLeft.value = !!rect && !!bound && (rect.right - POP_W) < bound.left + 4
   } catch (e) {
     toast(`加载 ${t.id} 版本失败: ${e}`, 'err')
   }
@@ -102,6 +119,8 @@ async function openPop(t) {
 
 function closePop() {
   pop.value = null
+  popUp.value = false
+  popLeft.value = false
 }
 
 async function pick(ver) {
@@ -155,7 +174,7 @@ const warnCount = computed(() =>
       </div>
     </header>
 
-    <div class="scroll" @click="closePop">
+    <div class="scroll" ref="scrollPane" @click="closePop">
       <!-- 热更新横幅 -->
       <div v-if="upd.available" class="update-banner">
         <span class="lamp up"></span>
@@ -175,7 +194,7 @@ const warnCount = computed(() =>
           v-for="t in tools"
           :key="t.id"
           class="gauge-card"
-          :class="{ dim: !t.current, active: t.current }"
+          :class="{ dim: !t.current, active: t.current, 'has-pop': pop && pop.tool === t.id }"
           @click="emit('open-tool', t.id)"
         >
           <!-- 头部：Logo + 工具名 + 状态灯 -->
@@ -209,22 +228,38 @@ const warnCount = computed(() =>
 
           <!-- 底部快捷切换动作区 -->
           <div class="card-foot" @click.stop>
-            <button class="switch-btn" title="快捷切换版本" @click.stop="openPop(t)">
+            <button
+              class="switch-btn"
+              :class="{ open: pop && pop.tool === t.id }"
+              title="快捷切换版本"
+              @click.stop="openPop(t, $event)"
+            >
               <Icon name="swap" :size="11" />
               <span>快捷切换</span>
-              <Icon name="chev" :size="10" />
+              <Icon name="chev" :size="10" class="chev" />
             </button>
           </div>
 
           <!-- 快捷版本选择弹层 -->
-          <div v-if="pop && pop.tool === t.id" class="pop-menu" @click.stop>
-            <div class="pop-header">{{ t.id }} · 快速切换</div>
+          <div
+            v-if="pop && pop.tool === t.id"
+            class="pop-menu"
+            :class="{ up: popUp, 'align-left': popLeft }"
+            @click.stop
+          >
+            <div class="pop-header">
+              <span class="pop-title">快速切换</span>
+              <span class="pop-tool num">{{ t.id }}</span>
+              <span class="pop-count num" v-if="pop.rows.length">{{ pop.rows.length }}</span>
+            </div>
             <div class="pop-list">
               <button
-                v-for="r in pop.rows"
+                v-for="(r, i) in pop.rows"
                 :key="r.version"
                 class="pop-item"
                 :class="{ active: r.active, readonly: !pickable(r) }"
+                :style="{ '--i': i }"
+                :title="pickable(r) ? '切换到 ' + r.version : '系统环境，不支持快捷切换'"
                 @click="pick(r.version)"
               >
                 <span class="lamp" :class="r.active ? 'ok' : 'idle'"></span>
@@ -238,9 +273,9 @@ const warnCount = computed(() =>
               </div>
 
               <div class="pop-divider"></div>
-              <button class="pop-item action" @click="emit('open-tool', t.id)">
-                <Icon name="down" :size="12" />
-                <span>安装新版本…</span>
+              <button class="pop-item action" :style="{ '--i': pop.rows.length }" @click="emit('open-tool', t.id)">
+                <Icon name="plus" :size="12" />
+                <span>安装新版本</span>
               </button>
             </div>
           </div>
@@ -450,49 +485,127 @@ const warnCount = computed(() =>
   align-items: center;
   justify-content: flex-end;
   margin-top: auto;
-  padding-top: 2px;
+  padding-top: 3px;
 }
 
+/* 快捷切换按钮：平时退为细线幽灵态，悬停/展开才上色 */
 .switch-btn {
-  height: 22px;
-  padding: 0 7px;
-  border-radius: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-ctl);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 10.5px;
-  color: var(--ink-2);
-  background: var(--surface-soft);
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--ink-3);
+  background: transparent;
   border: 1px solid var(--hairline);
-  transition: all 0.15s var(--ease);
+  transition: all 0.18s var(--ease);
 }
 
 .switch-btn:hover {
-  background: var(--surface-raised);
+  color: var(--accent-ink);
+  background: var(--accent-dim);
   border-color: var(--accent-line);
-  color: var(--ink-1);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-glow);
+}
+
+.switch-btn:active {
+  transform: scale(0.96) translateY(0);
+  box-shadow: none;
+}
+
+.switch-btn:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+}
+
+.switch-btn.open {
+  color: var(--accent-ink);
+  background: var(--accent-dim);
+  border-color: var(--accent-line);
+  box-shadow: var(--shadow-glow);
+}
+
+.switch-btn .chev {
+  opacity: 0.7;
+  transition: transform 0.22s var(--ease), opacity 0.18s var(--ease);
+}
+
+.switch-btn:hover .chev,
+.switch-btn.open .chev {
+  opacity: 1;
+}
+
+.switch-btn.open .chev {
+  transform: rotate(180deg);
+}
+
+/* 卡片浮起：把整张卡片的层叠顺序抬到兄弟卡片之上，弹层才不会被遮挡 */
+.gauge-card.has-pop {
+  z-index: 40;
+  opacity: 1;
+  border-color: var(--accent-line);
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-2px);
 }
 
 /* 快速切换弹层 */
 .pop-menu {
   position: absolute;
-  top: 42px;
-  right: 8px;
-  width: 200px;
+  top: 40px;
+  right: 6px;
+  width: 216px;
+  padding: 6px;
   background: var(--overlay);
   border: 1px solid var(--hairline-strong);
-  border-radius: var(--r-panel);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
-  backdrop-filter: blur(20px);
+  border-radius: 12px;
+  /* 两层阴影：黑色层服务暗色主题，冷色层在亮色主题里更有纵深 */
+  box-shadow:
+    0 20px 44px -16px rgba(8, 18, 28, 0.4),
+    0 4px 14px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 var(--glass-hi);
+  backdrop-filter: blur(20px) saturate(1.5);
   z-index: 50;
-  padding: 5px;
-  animation: popShow 0.16s var(--ease);
+  transform-origin: top right;
+  animation: popShow 0.18s var(--ease);
+}
+
+.pop-menu.up {
+  top: auto;
+  bottom: 34px;
+  transform-origin: bottom right;
+  animation-name: popShowUp;
+}
+
+.pop-menu.align-left {
+  right: auto;
+  left: 6px;
+  transform-origin: top left;
+}
+
+.pop-menu.align-left.up {
+  transform-origin: bottom left;
 }
 
 @keyframes popShow {
   from {
     opacity: 0;
-    transform: translateY(-4px) scale(0.97);
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes popShowUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
   }
   to {
     opacity: 1;
@@ -501,43 +614,107 @@ const warnCount = computed(() =>
 }
 
 .pop-header {
-  font-size: 10.5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px 7px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.pop-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--ink-3);
+}
+
+.pop-tool {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: var(--accent-dim);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.pop-count {
+  margin-left: auto;
+  min-width: 18px;
+  text-align: center;
+  font-size: 10px;
   font-weight: 600;
   color: var(--ink-3);
-  padding: 5px 7px 3px;
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 1px 5px;
 }
 
 .pop-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  max-height: 264px;
+  overflow-y: auto;
+}
+
+.pop-list::-webkit-scrollbar {
+  width: 3px;
+}
+
+.pop-list::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border-radius: 999px;
 }
 
 .pop-item {
-  height: 28px;
-  padding: 0 7px;
-  border-radius: 4px;
+  position: relative;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   font-size: 11.5px;
   color: var(--ink-2);
-  transition: all 0.12s var(--ease);
+  /* 逐条错峰入场，只动 opacity/transform */
+  animation: itemIn 0.2s var(--ease) backwards;
+  animation-delay: calc(var(--i, 0) * 20ms);
+  transition: background-color 0.14s var(--ease), color 0.14s var(--ease), transform 0.14s var(--ease);
+}
+
+@keyframes itemIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .pop-item:hover {
-  background: var(--surface-raised);
+  background: var(--accent-dim);
   color: var(--ink-1);
+  transform: translateX(2px);
+}
+
+.pop-item:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: -2px;
 }
 
 .pop-item.readonly {
   cursor: default;
-  opacity: 0.7;
+  opacity: 0.6;
 }
 
 .pop-item.readonly:hover {
   background: transparent;
   color: var(--ink-2);
+  transform: none;
 }
 
 .pop-item.active {
@@ -546,9 +723,23 @@ const warnCount = computed(() =>
   font-weight: 600;
 }
 
+/* 当前版本：左侧一道 accent 导轨，比单纯高亮更好识别 */
+.pop-item.active::before {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
 .ver-label {
   flex: 1;
   text-align: left;
+  font-size: 12px;
+  letter-spacing: -0.01em;
 }
 
 .check-icon {
@@ -558,14 +749,33 @@ const warnCount = computed(() =>
 .empty-note {
   font-size: 11px;
   color: var(--ink-3);
-  padding: 8px 6px;
+  padding: 12px 8px;
   text-align: center;
+  background: var(--surface-soft);
+  border: 1px dashed var(--hairline-strong);
+  border-radius: 6px;
 }
 
 .pop-divider {
   height: 1px;
   background: var(--hairline);
-  margin: 3px 0;
+  margin: 5px 6px;
+}
+
+.pop-item.action {
+  gap: 7px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.pop-item.action:hover {
+  color: var(--accent-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pop-item {
+    animation: none;
+  }
 }
 
 /* 诊断与提示双栏 */

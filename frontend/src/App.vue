@@ -158,6 +158,14 @@ onUnmounted(() => {
             <span class="lb" v-if="!collapsed">环境总览</span>
           </button>
           <button
+            :class="{ on: view.name === 'netproxy' }"
+            :title="collapsed ? '网络代理' : ''"
+            @click="goto('netproxy')"
+          >
+            <Icon name="proxy" :size="17" />
+            <span class="lb" v-if="!collapsed">网络代理</span>
+          </button>
+          <button
             class="pos-rel"
             :class="{ on: view.name === 'settings' }"
             :title="collapsed ? '系统设置' : ''"
@@ -166,14 +174,6 @@ onUnmounted(() => {
             <Icon name="gear" :size="17" />
             <span class="lb" v-if="!collapsed">系统设置</span>
             <span v-if="hasUpdate" class="rail-update-dot" :class="{ 'is-collapsed': collapsed }" title="发现新版本"></span>
-          </button>
-          <button
-            :class="{ on: view.name === 'netproxy' }"
-            :title="collapsed ? '网络代理' : ''"
-            @click="goto('netproxy')"
-          >
-            <Icon name="proxy" :size="17" />
-            <span class="lb" v-if="!collapsed">网络代理</span>
           </button>
         </nav>
 
@@ -264,37 +264,60 @@ onUnmounted(() => {
   padding: 12px 8px 10px;
 }
 
+/* 折叠把手：骑在侧栏与内容区的分界线上，默认安静、悬停上色 */
 .rail-toggle {
   position: absolute;
-  top: 13px;
-  right: -10px;
-  z-index: 10;
-  width: 20px;
-  height: 20px;
+  top: 18px;
+  right: -11px;
+  z-index: 60;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: var(--surface-raised);
   border: 1px solid var(--hairline-strong);
-  color: var(--ink-2);
+  color: var(--ink-3);
   display: grid;
   place-items: center;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
-  transition: all 0.15s var(--ease);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 var(--glass-hi);
+  transition: all 0.18s var(--ease);
+}
+
+/* 扩大点击热区，视觉上仍是小圆钮 */
+.rail-toggle::before {
+  content: '';
+  position: absolute;
+  inset: -7px;
 }
 
 .rail-toggle:hover {
-  color: var(--ink-1);
+  color: #FFFFFF;
   background: var(--accent);
   border-color: var(--accent);
+  transform: scale(1.1);
+  box-shadow:
+    0 0 0 4px var(--accent-dim),
+    0 4px 14px var(--accent-line);
 }
 
 .rail-toggle:hover .toggle-svg {
   color: #FFFFFF;
 }
 
+.rail-toggle:active {
+  transform: scale(0.95);
+}
+
+.rail-toggle:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 3px;
+}
+
 .toggle-svg {
   width: 13px;
   height: 13px;
-  transition: transform 0.22s var(--ease);
+  transition: transform 0.26s var(--ease);
 }
 
 .toggle-svg.is-flipped {
