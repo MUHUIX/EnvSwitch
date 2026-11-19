@@ -44,7 +44,7 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ github.ref_name }}"
-          $ld = "-s -w -X github.com/HUIdada1/envswitch/internal/core.Version=$ver"
+          $ld = "-s -w -X github.com/MUHUIX/envswitch/internal/core.Version=$ver"
           go build -trimpath -ldflags $ld -o build\bin\envs.exe .\cmd\envs
           go build -tags production -trimpath -ldflags "$ld -H=windowsgui" -o build\bin\EnvSwitch.exe .
           New-Item -ItemType Directory -Force -Path out | Out-Null
