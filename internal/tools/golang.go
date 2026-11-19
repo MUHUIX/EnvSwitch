@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/HUIdada1/envswitch/internal/core"
-	"github.com/HUIdada1/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/core"
+	"github.com/MUHUIX/envswitch/internal/settings"
 )
 
 // Go —— 官方 dl JSON（golang.google.cn 镜像同接口）。zip 根 go/ 展平后 bin/ 进 PATH。

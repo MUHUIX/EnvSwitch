@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/HUIdada1/envswitch/internal/settings"
-	"github.com/HUIdada1/envswitch/internal/sys"
+	"github.com/MUHUIX/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/sys"
 )
 
 // ListInstalls 汇总本机版本：store 自有 + 适配器声明的收编来源（如 nvm）。

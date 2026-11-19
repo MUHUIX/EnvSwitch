@@ -3,8 +3,8 @@ package tools
 import (
 	"context"
 
-	"github.com/HUIdada1/envswitch/internal/core"
-	"github.com/HUIdada1/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/core"
+	"github.com/MUHUIX/envswitch/internal/settings"
 )
 
 // —— npm / pnpm / yarn：registry tarball 形态；junction 指包根，PATH 经自生成 shim ——

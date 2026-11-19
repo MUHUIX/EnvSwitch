@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/HUIdada1/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/settings"
 )
 
 // EnsureShims 为已激活的 JS 工具生成/更新 bin\shims\*.cmd。

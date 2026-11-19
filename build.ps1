@@ -6,7 +6,7 @@
 # EnvSwitch 本地构建脚本（Windows PowerShell）
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
-$LdFlags = "-s -w -X github.com/HUIdada1/envswitch/internal/core.Version=$Version"
+$LdFlags = "-s -w -X github.com/MUHUIX/envswitch/internal/core.Version=$Version"
 
 if (-not $Cli -and -not $Gui) { $Cli = $true; $Gui = $true }
 

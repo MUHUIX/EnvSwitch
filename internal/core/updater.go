@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/HUIdada1/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/settings"
 )
 
 // 热更新：读 updates 分支 latest.json → 下载 zip → sha256 校验 →

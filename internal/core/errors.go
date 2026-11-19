@@ -1,6 +1,6 @@
 // Package core 是 EnvSwitch 的编排层：错误码、远程索引、本地仓库、
 // 下载校验解包、切换与热更新。GUI 与 CLI 都只调这一层，保证行为一致。
-// 构建期注入版本：-ldflags "-X github.com/HUIdada1/envswitch/internal/core.Version=v1.0.0"
+// 构建期注入版本：-ldflags "-X github.com/MUHUIX/envswitch/internal/core.Version=v1.0.0"
 package core
 
 import (

@@ -19,10 +19,10 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	wrt "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"github.com/HUIdada1/envswitch/internal/app"
-	"github.com/HUIdada1/envswitch/internal/core"
-	"github.com/HUIdada1/envswitch/internal/settings"
-	"github.com/HUIdada1/envswitch/internal/sys"
+	"github.com/MUHUIX/envswitch/internal/app"
+	"github.com/MUHUIX/envswitch/internal/core"
+	"github.com/MUHUIX/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/sys"
 )
 
 func detachedAttr() *syscall.SysProcAttr {

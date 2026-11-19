@@ -4,8 +4,8 @@ package tools
 import (
 	"strings"
 
-	"github.com/HUIdada1/envswitch/internal/core"
-	"github.com/HUIdada1/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/core"
+	"github.com/MUHUIX/envswitch/internal/settings"
 )
 
 func All() []core.Adapter {

@@ -116,7 +116,7 @@ GUI 基于 Wails v2 + Vue 3，窗口自绘标题栏，关闭默认缩到托盘�
 .\build.ps1 -Gui      # 只构建 EnvSwitch.exe
 ```
 
-产物在 `build\bin\`。手动构建的话，先 `cd frontend && npm install && npm run build`，因为 GUI 的 Go 代码会 embed `frontend/dist`；然后 `go build ./cmd/envs` 出 CLI，`go build -tags production -ldflags "-H=windowsgui" -o build\bin\EnvSwitch.exe .` 出 GUI（不需要装 wails 命令行）。版本号通过 `-X github.com/HUIdada1/envswitch/internal/core.Version=vX.Y.Z` 注入。module 路径仍是账号改名前的 `HUIdada1/envswitch`：它只是编译期符号前缀，不影响本地构建与发布；真要改，必须同步 `go.mod`、全部 import 以及 `build.ps1` / `.github/workflows/release.yml` 里的 `-X` 路径，漏掉任何一处，版本号会静默退回 `dev`。
+产物在 `build\bin\`。手动构建的话，先 `cd frontend && npm install && npm run build`，因为 GUI 的 Go 代码会 embed `frontend/dist`；然后 `go build ./cmd/envs` 出 CLI，`go build -tags production -ldflags "-H=windowsgui" -o build\bin\EnvSwitch.exe .` 出 GUI（不需要装 wails 命令行）。版本号通过 `-X github.com/MUHUIX/envswitch/internal/core.Version=vX.Y.Z` 注入。module 路径已随 GitHub 账号改名同步为 `MUHUIX/envswitch`（改名前是 `HUIdada1/envswitch`）：它虽是编译期符号前缀，但要动就必须同步 `go.mod`、全部 import 以及 `build.ps1` / `.github/workflows/release.yml` 里的 `-X` 路径，漏掉任何一处，版本号会静默退回 `dev`（本次已用 `go build -ldflags "-X …Version=vVERIFY"` 实链验证注入生效）。
 
 前端单独开发用 `wails dev`，有热更新。
 

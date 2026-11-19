@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/HUIdada1/envswitch/internal/settings"
-	"github.com/HUIdada1/envswitch/internal/sys"
+	"github.com/MUHUIX/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/sys"
 )
 
 // Check 单项诊断结果。

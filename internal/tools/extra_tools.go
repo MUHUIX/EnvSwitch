@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/HUIdada1/envswitch/internal/core"
-	"github.com/HUIdada1/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/core"
+	"github.com/MUHUIX/envswitch/internal/settings"
 )
 
 // Pip —— Python 官方包管理器。pip 以 wheel 形式随解释器分发，单独解包得不到

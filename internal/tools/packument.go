@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/HUIdada1/envswitch/internal/core"
-	"github.com/HUIdada1/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/core"
+	"github.com/MUHUIX/envswitch/internal/settings"
 )
 
 // packument —— npm registry 缩写元数据：

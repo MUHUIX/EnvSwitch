@@ -1,6 +1,6 @@
 package core
 
-import "github.com/HUIdada1/envswitch/internal/settings"
+import "github.com/MUHUIX/envswitch/internal/settings"
 
 // RemoteVersion 一条远程可安装版本。
 type RemoteVersion struct {

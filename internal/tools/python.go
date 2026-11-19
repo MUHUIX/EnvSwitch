@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/HUIdada1/envswitch/internal/core"
-	"github.com/HUIdada1/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/core"
+	"github.com/MUHUIX/envswitch/internal/settings"
 )
 
 // Python —— python-build-standalone install_only（含 pip/venv，portable 解压即用）。

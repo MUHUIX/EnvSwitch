@@ -18,10 +18,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/HUIdada1/envswitch/internal/core"
-	"github.com/HUIdada1/envswitch/internal/settings"
-	"github.com/HUIdada1/envswitch/internal/sys"
-	"github.com/HUIdada1/envswitch/internal/tools"
+	"github.com/MUHUIX/envswitch/internal/core"
+	"github.com/MUHUIX/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/sys"
+	"github.com/MUHUIX/envswitch/internal/tools"
 )
 
 // version 供 -X main.version 旧注入兼容；显示统一走 core.BuildVersion。

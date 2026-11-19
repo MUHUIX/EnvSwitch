@@ -16,11 +16,11 @@ import (
 
 	wrt "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"github.com/HUIdada1/envswitch/internal/core"
-	"github.com/HUIdada1/envswitch/internal/netproxy"
-	"github.com/HUIdada1/envswitch/internal/settings"
-	"github.com/HUIdada1/envswitch/internal/sys"
-	"github.com/HUIdada1/envswitch/internal/tools"
+	"github.com/MUHUIX/envswitch/internal/core"
+	"github.com/MUHUIX/envswitch/internal/netproxy"
+	"github.com/MUHUIX/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/sys"
+	"github.com/MUHUIX/envswitch/internal/tools"
 )
 
 // App 单实例服务。binds 方法名即前端 window.go.app.App.<Method>。

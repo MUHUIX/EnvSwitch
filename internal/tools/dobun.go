@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/HUIdada1/envswitch/internal/core"
-	"github.com/HUIdada1/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/core"
+	"github.com/MUHUIX/envswitch/internal/settings"
 )
 
 // version 从 tag 提取数字段（deno tag=v2.9.8，bun tag=bun-v1.4.4，redis tag=5.0.14.1）

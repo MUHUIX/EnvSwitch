@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/HUIdada1/envswitch/internal/settings"
-	"github.com/HUIdada1/envswitch/internal/sys"
+	"github.com/MUHUIX/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/sys"
 )
 
 // Switch 把工具激活 junction 重指到 inst.BinDir，并广播环境变化所需的最小写入。

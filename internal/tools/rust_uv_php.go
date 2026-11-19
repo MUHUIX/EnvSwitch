@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/HUIdada1/envswitch/internal/core"
-	"github.com/HUIdada1/envswitch/internal/settings"
+	"github.com/MUHUIX/envswitch/internal/core"
+	"github.com/MUHUIX/envswitch/internal/settings"
 )
 
 // Rust —— 官方独立便携工具链归档 (rustc + cargo x86_64-pc-windows-msvc/gnu)

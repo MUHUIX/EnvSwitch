@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/HUIdada1/envswitch/internal/netproxy"
+	"github.com/MUHUIX/envswitch/internal/netproxy"
 	"golang.org/x/net/proxy"
 )
 
