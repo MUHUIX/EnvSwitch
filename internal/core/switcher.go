@@ -34,8 +34,10 @@ func Switch(s *settings.Settings, ad Adapter, inst *Install) error {
 	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
 		return err
 	}
-	// 先摘旧链接（不存在则跳过）
-	if _, ok := junctionTarget(link); ok || dirExists(link) {
+	// 先摘旧链接（不存在则跳过）。判据必须是 Lstat 而不是 junctionTarget 的 ok：
+	// 目标目录被外部删掉后，链接既解析不出有效目标、Stat 也失败，旧代码会跳过摘除，
+	// 紧接着 CreateJunction 的 MkdirAll 就报「文件已存在」—— 死链状态下 use 永远修不好。
+	if linkPresent(link) {
 		if err := removeLink(link); err != nil {
 			return err
 		}
@@ -51,13 +53,22 @@ func Switch(s *settings.Settings, ad Adapter, inst *Install) error {
 	return nil
 }
 
+// linkPresent 判断激活链接本身在不在（含指向已删目录的死 junction）。
+// Stat 会顺着链接走，死链上必然失败，所以用 Lstat 只看链接自身。
+func linkPresent(link string) bool {
+	_, err := os.Lstat(link)
+	return err == nil
+}
+
 func dirExists(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && fi.IsDir()
 }
 
 func removeLink(link string) error {
-	if _, ok := junctionTarget(link); ok {
+	// junctionTarget 的第一返回值非空 = 它确实是个 mount-point junction（哪怕目标已失效），
+	// 必须走 FSCTL_DELETE_REPARSE_POINT 摘链接；直接 os.Remove 在死链上会失败。
+	if target, ok := junctionTarget(link); ok || target != "" {
 		return sys.RemoveJunction(link)
 	}
 	// 普通目录（首次或有残留）：只允许删空目录，绝不递归删未知内容

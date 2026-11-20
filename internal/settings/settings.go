@@ -159,6 +159,9 @@ func LogsDir(s *Settings) string      { return filepath.Join(Home(), "logs") }
 func UpdateDir(s *Settings) string    { return filepath.Join(Home(), "update") }
 func PathBackup(s *Settings) string   { return filepath.Join(Home(), "path-backup.json") }
 
+// DoctorFixBackup 是「一键修复体检项」写用户 PATH 前的原值快照，撤销时按它还原。
+func DoctorFixBackup(s *Settings) string { return filepath.Join(Home(), "doctor-fix.json") }
+
 // CurrentLink 返回工具激活 junction 路径，如 home\current\node
 func CurrentLink(s *Settings, tool string) string {
 	return filepath.Join(CurrentDir(s), tool)

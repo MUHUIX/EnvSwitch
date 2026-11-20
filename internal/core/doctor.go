@@ -42,21 +42,8 @@ func Doctor(ads []Adapter, s *settings.Settings) []Check {
 
 	// 2 激活链接健康
 	links := settings.OwnedPathEntries(s)
-	alive, dead := 0, 0
-	var deadNames []string
-	for _, l := range links {
-		if _, ok := junctionTarget(l); ok {
-			alive++
-			continue
-		}
-		tool := filepath.Base(l)
-		if !anyInstallFor(ads, s, tool) { // 该工具一个版本都没有：不算死
-			continue
-		}
-		dead++
-		deadNames = append(deadNames, tool)
-	}
-	if dead == 0 {
+	alive, _, deadNames := junctionHealth(ads, s, links)
+	if len(deadNames) == 0 {
 		out = append(out, Check{"激活链接", "ok", fmt.Sprintf("%d 条 junction 有效", alive)})
 	} else {
 		out = append(out, Check{"激活链接", "bad", "失效: " + strings.Join(deadNames, ", ") + "（重新 use 即可修复）"})
@@ -260,16 +247,23 @@ func ownedPathRegistered(links []string, userRaw string) []string {
 	return out
 }
 
-// staleOwnedPathEntries 扫用户 PATH 上**所有** EnvSwitch 自有条目（三个激活链接 + bin\shims
+// staleOwnedPathEntries 是 staleOwnedPaths 的文案面（判定共用一份，见下）。
+func staleOwnedPathEntries(userRaw string) []string {
+	_, descs := staleOwnedPaths(userRaw)
+	return descs
+}
+
+// staleOwnedPaths 扫用户 PATH 上**所有** EnvSwitch 自有条目（三个激活链接 + bin\shims
 // + 安装目录 ExeDir），报两类挂在 PATH 上却没用的壳：
 //   - 目录不存在（激活前 EnsurePATH 建的壳后来被删、或 envs.exe 被搬走留下孤儿记录）；
 //   - 普通空目录且不是 junction（§7.3-3 点的 current\go、current\python 就是这个形状）。
 //
 // 判据要三条同时成立才报：挂在用户 PATH 上 + 不是有效 junction + 目录存在且为空（或不存在）。
 // 用户自己放的有内容目录、以及没挂在 PATH 上的目录都不报，避免误伤。
-func staleOwnedPathEntries(userRaw string) []string {
+//
+// 返回两份等长的切片：paths 是原始条目（供 DoctorFix 精确摘除），descs 是报事文案。
+func staleOwnedPaths(userRaw string) (paths, descs []string) {
 	homeKey := strings.ToLower(filepath.Clean(settings.Home())) + string(filepath.Separator)
-	var out []string
 	seen := map[string]bool{}
 	for _, seg := range strings.Split(userRaw, ";") {
 		seg = strings.TrimSpace(expandPercent(seg))
@@ -286,11 +280,11 @@ func staleOwnedPathEntries(userRaw string) []string {
 		}
 		fi, err := os.Stat(seg)
 		if err != nil {
-			out = append(out, fmt.Sprintf(`%s 挂在用户 PATH 上但目录已不存在（孤儿 PATH 记录）`, seg))
+			paths, descs = append(paths, seg), append(descs, fmt.Sprintf(`%s 挂在用户 PATH 上但目录已不存在（孤儿 PATH 记录）`, seg))
 			continue
 		}
 		if !fi.IsDir() {
-			out = append(out, fmt.Sprintf(`%s 挂在用户 PATH 上但它是文件不是目录`, seg))
+			paths, descs = append(paths, seg), append(descs, fmt.Sprintf(`%s 挂在用户 PATH 上但它是文件不是目录`, seg))
 			continue
 		}
 		if names, err := os.ReadDir(seg); err == nil && len(names) > 0 {
@@ -300,7 +294,7 @@ func staleOwnedPathEntries(userRaw string) []string {
 		if !strings.HasPrefix(k, homeKey) {
 			kind = "空目录"
 		}
-		out = append(out, fmt.Sprintf(`%s 是%s却挂在用户 PATH 上`, seg, kind))
+		paths, descs = append(paths, seg), append(descs, fmt.Sprintf(`%s 是%s却挂在用户 PATH 上`, seg, kind))
 	}
 	// lead 裁决 R9-3 补充：安装目录形态的记录（如 E:\EnvSwitch）不走 IsOwnedPath ——
 	// 只有「当前这个 exe 就在里面」时才算自有，从别处跑 envs 时它就变成看不见的孤儿。
@@ -316,20 +310,27 @@ func staleOwnedPathEntries(userRaw string) []string {
 		if _, err := os.Stat(seg); err == nil {
 			continue // 目录在，是有效安装位置（EnvSwitch 不主张别人的目录，也不报）
 		}
-		out = append(out, fmt.Sprintf(`%s 挂在用户 PATH 上但目录已不存在（疑似搬过 envs.exe 留下的孤儿记录）`, seg))
+		paths, descs = append(paths, seg), append(descs, fmt.Sprintf(`%s 挂在用户 PATH 上但目录已不存在（疑似搬过 envs.exe 留下的孤儿记录）`, seg))
 	}
-	return out
+	return paths, descs
 }
 
-// unstableOwnedPathEntries 是 R11 的只读体检面（lead 裁决 ③）：用户 PATH 上如果挂着
+// unstableOwnedPathEntries 是 unstableOwnedPaths 的文案面（判定共用一份，见下）。
+func unstableOwnedPathEntries(userRaw string) []string {
+	_, descs := unstableOwnedPaths(userRaw)
+	return descs
+}
+
+// unstableOwnedPaths 是 R11 的只读体检面（lead 裁决 ③）：用户 PATH 上如果挂着
 // 「指向临时目录 / 构建产物目录 / git 工作区」的 EnvSwitch 自有条目，说明这台机器的 PATH
 // 是被某次 dev 或临时构建写进去的 —— 那种路径随时会消失，普通用户机器上不该出现。
 //
-// 只报不改：写入逻辑属 `OwnedPathEntries`/`EnsurePATH` 的功能面（在 11db8df 就存在，不是
-// 本功能引入），改动会改变 PATH 写入集合，超出方案 §9/§11 的文字边界，等用户裁决。
+// Doctor 侧只报不改（写入逻辑属功能面，等用户裁决）；DoctorFix 侧把摘掉它作为
+// 「一键修复」的可选动作 —— 与 envs path restore 的口径一致（按当前 home / 当前 exe 目录判归属）。
 // 三条判据直接复用 R11 的 underTempDir / buildArtifactDir / insideSourceRepo，不写第二份。
-func unstableOwnedPathEntries(userRaw string) []string {
-	var out []string
+//
+// 返回两份等长的切片：paths 是原始条目（供 DoctorFix 精确摘除），descs 是报事文案。
+func unstableOwnedPaths(userRaw string) (paths, descs []string) {
 	seen := map[string]bool{}
 	for _, seg := range strings.Split(userRaw, ";") {
 		seg = strings.TrimSpace(expandPercent(seg))
@@ -345,16 +346,20 @@ func unstableOwnedPathEntries(userRaw string) []string {
 			continue
 		}
 		seen[k] = true
+		var desc string
 		switch {
 		case underTempDir(seg):
-			out = append(out, fmt.Sprintf(`%s 在临时目录里，却是 EnvSwitch 写进用户 PATH 的条目`, seg))
+			desc = fmt.Sprintf(`%s 在临时目录里，却是 EnvSwitch 写进用户 PATH 的条目`, seg)
 		case buildArtifactDir(seg):
-			out = append(out, fmt.Sprintf(`%s 是构建产物目录（build\ 或 \.t\），却挂在用户 PATH 上`, seg))
+			desc = fmt.Sprintf(`%s 是构建产物目录（build\ 或 \.t\），却挂在用户 PATH 上`, seg)
 		case insideSourceRepo(seg):
-			out = append(out, fmt.Sprintf(`%s 在某个 git 工作区内，像是开发时写进去的 EnvSwitch 目录`, seg))
+			desc = fmt.Sprintf(`%s 在某个 git 工作区内，像是开发时写进去的 EnvSwitch 目录`, seg)
+		default:
+			continue
 		}
+		paths, descs = append(paths, seg), append(descs, desc)
 	}
-	return out
+	return paths, descs
 }
 
 // layer2GuardCheck 如实报告层 2 兜底是否还在查表：shim 侧的行数护栏是
@@ -477,6 +482,24 @@ func containsFold(xs []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// junctionHealth 数出有效的激活链接，并返回失效链接的路径与对应工具名。
+// 判定口径只留一份：Doctor 用它报事，DoctorFix 用它决定该重指哪个工具。
+func junctionHealth(ads []Adapter, s *settings.Settings, links []string) (alive int, deadPaths, deadTools []string) {
+	for _, l := range links {
+		if _, ok := junctionTarget(l); ok {
+			alive++
+			continue
+		}
+		tool := filepath.Base(l)
+		if !anyInstallFor(ads, s, tool) { // 该工具一个版本都没有：不算死
+			continue
+		}
+		deadPaths = append(deadPaths, l)
+		deadTools = append(deadTools, tool)
+	}
+	return alive, deadPaths, deadTools
 }
 
 func anyInstallFor(ads []Adapter, s *settings.Settings, tool string) bool {

@@ -8,6 +8,9 @@ function call (method, ...args) {
   return b[method](...args)
 }
 
+// dev 模式（浏览器直开）的诊断修复演示状态：修一次就有可撤销的快照。
+let demoFixState = { canUndo: false, savedAt: '', actions: [] }
+
 let demoNetProxy = {
   version: 1,
   mode: 'off',
@@ -260,7 +263,36 @@ function demo (method, args) {
       exeDir: 'C:\\Program Files\\EnvSwitch'
     }
   }
-  if (method === 'Doctor') return []
+  if (method === 'Doctor') {
+    // dev 预览给一份真实形态的体检结果：两条可修、一条只能手动，便于核对按钮与文案
+    return [
+      { name: '注册表写入', status: 'ok', detail: 'HKCU\\Environment 可写', fixable: false },
+      { name: '激活链接', status: 'bad', detail: '失效: go（重新 use 即可修复）', fixable: true },
+      {
+        name: 'PATH 优先级',
+        status: 'bad',
+        detail: 'node 由 C:\\nvm4w\\nodejs 抢先（用户 PATH），`envs use` 在你机器上当前无效；目录绑定不受影响（走会话注入）',
+        fixable: true
+      },
+      { name: '空壳 PATH 条目', status: 'warn', detail: 'C:\\Users\\me\\AppData\\Local\\EnvSwitch\\current\\python 是普通空目录（非 junction）却挂在用户 PATH 上', fixable: true },
+      { name: '层 2 兜底', status: 'ok', detail: '绑定表 6 行（≤120 行护栏内，全表参与匹配）', fixable: false },
+      { name: 'WebView2', status: 'warn', detail: '未安装运行库，GUI 无法启动；CLI 不受影响', fixable: false },
+      { name: '版本库占用', status: 'info', detail: '3.4 GB', fixable: false }
+    ]
+  }
+  if (method === 'DoctorFix') {
+    demoFixState = { canUndo: true, savedAt: new Date().toISOString(), actions: [String(args[0] || 'PATH 调整')] }
+    return [
+      `${args[0]}：已从用户 PATH 摘掉 1 条失效条目（C:\\Users\\me\\AppData\\Local\\EnvSwitch\\current\\python）`,
+      '复检：同类条目已清零 ✓',
+      '修复前的用户 PATH 已备份，可在诊断卡片右上「撤销上次修复」还原'
+    ]
+  }
+  if (method === 'DoctorUndo') {
+    demoFixState = { canUndo: false, savedAt: '', actions: [] }
+    return ['已撤销「PATH 调整」，用户 PATH 还原到修复前的值']
+  }
+  if (method === 'DoctorFixState') return JSON.parse(JSON.stringify(demoFixState))
   if (method === 'RefreshEnv') return demo('Overview', args)
   if (method === 'Settings') return { autostart: false, closeToTray: true, autoCheckUpdate: true, checkUpdateOnStart: true, storePath: '(dev)', mirrors: {}, proxy: '', indexCacheMinutes: 10, version: 'dev', remoteState: {}, totalSize: '—', installedCount: 0, managedEnv: [] }
   if (method === 'PickDirectory') return ''
@@ -276,6 +308,9 @@ export const api = {
   remote: (t) => call('Remote', t),
   location: (t) => call('Location', t),
   doctor: () => call('Doctor'),
+  doctorFix: (name) => call('DoctorFix', name || ''),
+  doctorUndo: () => call('DoctorUndo'),
+  doctorFixState: () => call('DoctorFixState'),
   settings: () => call('Settings'),
   use: (t, v) => call('Use', t, v),
   install: (t, v) => call('Install', t, v),

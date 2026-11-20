@@ -228,6 +228,15 @@ async function refresh() {
 // 头部当前版本的路径：优先 junction 真实目标，未激活时回落到检测到的目录
 const currentPath = computed(() => loc.value?.currentTarget || current.value?.rootDir || '')
 
+// 安装位置卡片的收起状态：路径都是长串，多数人只看一眼，默认留一手收起的余地。
+// 按应用级偏好记（不是按工具记）——换工具看详情时口径一致，不会每个页面都要重新收。
+const locCollapsed = ref(localStorage.getItem('envswitch-loc-collapsed') === '1')
+
+function toggleLoc() {
+  locCollapsed.value = !locCollapsed.value
+  localStorage.setItem('envswitch-loc-collapsed', locCollapsed.value ? '1' : '0')
+}
+
 // 上方「安装位置」四格：版本库、本工具目录、激活链接、新版本落点。
 // 路径都可能很长，统一交给 CSS 省略号 + title 展示全文。
 const locFacts = computed(() => {
@@ -480,56 +489,71 @@ async function toggleManaged(row) {
       </div>
 
       <!-- 安装位置：默认/自定义版本库、本工具目录、激活链接、新版本落点 -->
-      <section v-if="loc" class="loc-panel">
+      <section v-if="loc" class="loc-panel" :class="{ collapsed: locCollapsed }">
         <div class="panel-head">
           <h4>安装位置</h4>
+          <!-- 收起时把版本库根目录提到标题行，路径仍在手边可读到 -->
+          <span v-if="locCollapsed" class="loc-brief num" :title="loc.storeDir">{{ loc.storeDir }}</span>
           <div class="loc-head-right">
             <span class="loc-flag" :class="{ custom: loc.storeCustom }">
               {{ loc.storeCustom ? '自定义版本库' : '默认版本库' }}
             </span>
-            <button class="btn ghost sm" title="把版本库整体迁到其他磁盘" @click="openStoreMove">
-              <Icon name="swap" :size="12" />
-              <span>更改位置</span>
-            </button>
-            <button class="btn ghost sm" :title="`打开 ${loc.storeDir}`" @click="openDir(loc.storeDir)">
-              <Icon name="folder" :size="12" />
-              <span>打开版本库</span>
+            <template v-if="!locCollapsed">
+              <button class="btn ghost sm" title="把版本库整体迁到其他磁盘" @click="openStoreMove">
+                <Icon name="swap" :size="12" />
+                <span>更改位置</span>
+              </button>
+              <button class="btn ghost sm" :title="`打开 ${loc.storeDir}`" @click="openDir(loc.storeDir)">
+                <Icon name="folder" :size="12" />
+                <span>打开版本库</span>
+              </button>
+            </template>
+            <!-- 收起/展开整张卡片：偏好按应用记住，换工具看详情时口径一致 -->
+            <button
+              class="loc-collapse"
+              :title="locCollapsed ? '展开安装位置' : '收起安装位置'"
+              :aria-expanded="!locCollapsed"
+              @click="toggleLoc"
+            >
+              <Icon name="chevron" :size="14" class="loc-arrow" />
             </button>
           </div>
         </div>
 
-        <div class="loc-grid">
-          <div v-for="f in locFacts" :key="f.key" class="loc-item">
-            <div class="loc-k">
-              <span class="loc-label">{{ f.label }}</span>
-              <span v-if="f.tag" class="loc-tag" :class="f.tagKind">{{ f.tag }}</span>
-              <div class="loc-ops">
-                <button
-                  class="icon-btn"
-                  :title="copied === f.value ? '已复制' : '复制路径'"
-                  :aria-label="`复制 ${f.label}`"
-                  @click="copyPath(f.value)"
-                >
-                  <Icon :name="copied === f.value ? 'check' : 'copy'" :size="13" />
-                </button>
-                <button
-                  v-if="f.openable"
-                  class="icon-btn"
-                  title="打开目录"
-                  :aria-label="`打开 ${f.label}`"
-                  @click="openDir(f.value)"
-                >
-                  <Icon name="folder" :size="13" />
-                </button>
+        <div class="loc-body" :class="{ 'is-hidden': locCollapsed }">
+          <div class="loc-grid">
+            <div v-for="f in locFacts" :key="f.key" class="loc-item">
+              <div class="loc-k">
+                <span class="loc-label">{{ f.label }}</span>
+                <span v-if="f.tag" class="loc-tag" :class="f.tagKind">{{ f.tag }}</span>
+                <div class="loc-ops">
+                  <button
+                    class="icon-btn"
+                    :title="copied === f.value ? '已复制' : '复制路径'"
+                    :aria-label="`复制 ${f.label}`"
+                    @click="copyPath(f.value)"
+                  >
+                    <Icon :name="copied === f.value ? 'check' : 'copy'" :size="13" />
+                  </button>
+                  <button
+                    v-if="f.openable"
+                    class="icon-btn"
+                    title="打开目录"
+                    :aria-label="`打开 ${f.label}`"
+                    @click="openDir(f.value)"
+                  >
+                    <Icon name="folder" :size="13" />
+                  </button>
+                </div>
               </div>
+              <div class="loc-v num" :title="f.value">{{ f.value }}</div>
+              <div v-if="f.sub" class="loc-sub num" :title="f.sub">{{ f.sub }}</div>
             </div>
-            <div class="loc-v num" :title="f.value">{{ f.value }}</div>
-            <div v-if="f.sub" class="loc-sub num" :title="f.sub">{{ f.sub }}</div>
           </div>
-        </div>
 
-        <div v-if="loc.storeCustom" class="loc-foot">
-          当前使用自定义版本库；默认位置为 <span class="num">{{ loc.storeDefault }}</span>
+          <div v-if="loc.storeCustom" class="loc-foot">
+            当前使用自定义版本库；默认位置为 <span class="num">{{ loc.storeDefault }}</span>
+          </div>
         </div>
       </section>
 
@@ -848,6 +872,70 @@ async function toggleManaged(row) {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
+}
+
+/* 收起态：标题行右侧直接给出版本库根目录，长路径中段省略 */
+.loc-brief {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 卡片收起把手：与侧栏分组头同一套箭头语言（收起时箭头转向右） */
+.loc-collapse {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-ctl);
+  border: 1px solid transparent;
+  color: var(--ink-3);
+  transition: all 0.15s var(--ease);
+}
+
+.loc-collapse:hover {
+  color: var(--ink-1);
+  background: var(--surface-raised);
+  border-color: var(--hairline-strong);
+}
+
+.loc-collapse:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+}
+
+.loc-arrow {
+  transition: transform 0.22s var(--ease);
+}
+
+.loc-panel.collapsed .loc-arrow {
+  transform: rotate(-90deg);
+}
+
+/* 收起时标题行的分隔线与下边距都不要，卡片压回一条 */
+.loc-panel.collapsed .panel-head {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.loc-body {
+  overflow: hidden;
+  max-height: 640px;
+  opacity: 1;
+  transition: max-height 0.26s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+}
+
+.loc-body.is-hidden {
+  max-height: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .loc-flag {

@@ -72,6 +72,7 @@ onMounted(async () => {
   } catch (e) {
     // 降级保护
   }
+  loadFixState()
   offUpdate = on('update', (u) => { upd.value = u })
 
   // 默认定时检索当前激活的什么版本（每 3.5 秒轮询 + 窗口聚焦时即刻检索）
@@ -153,6 +154,72 @@ function formatSource(s) {
 const warnCount = computed(() =>
   doctors.value.filter(d => d.status === 'warn' || d.status === 'bad').length
 )
+
+// —— 诊断修复：可修项一键修，修前用户 PATH 已快照，随时撤销一次 ——
+
+const fixBusy = ref('') // 正在处理的体检项名（'' = 空闲）
+const fixState = ref({ canUndo: false, savedAt: '', actions: [] })
+const fixNotes = ref([]) // 最近一次修复/撤销的逐条结论（含复检结果）
+
+async function loadFixState() {
+  try {
+    fixState.value = (await api.doctorFixState()) || { canUndo: false }
+  } catch (e) {
+    // 降级保护：拿不到快照状态时只是不显示撤销按钮
+  }
+}
+
+async function reloadDoctor() {
+  try {
+    doctors.value = (await api.doctor()) || []
+  } catch (e) {
+    // 降级保护
+  }
+}
+
+function canFix(d) {
+  return !!d.fixable && (d.status === 'warn' || d.status === 'bad')
+}
+
+async function runFix(name) {
+  if (fixBusy.value) return
+  fixBusy.value = name
+  try {
+    const notes = (await api.doctorFix(name)) || []
+    fixNotes.value = notes
+    const head = notes.length ? String(notes[0]) : `${name} 已处理`
+    // 复检通过才算修好；「仍有 / 跳过 / 修不了」一律按提示色，不把没修好的事报成成功
+    const all = notes.join('\n')
+    const good = !all || all.includes('✓') || all.includes('无需修复')
+    toast(head, good ? '' : 'warn')
+    await reloadDoctor()
+    await loadFixState()
+    pollOverview()
+  } catch (e) {
+    fixNotes.value = [String(e)]
+    toast(`${name} 修复失败：${e}`, 'err')
+  } finally {
+    fixBusy.value = ''
+  }
+}
+
+async function runUndo() {
+  if (fixBusy.value) return
+  fixBusy.value = 'undo'
+  try {
+    const notes = (await api.doctorUndo()) || []
+    fixNotes.value = notes
+    toast(notes.length ? String(notes[0]) : '已撤销上次修复')
+    await reloadDoctor()
+    await loadFixState()
+    pollOverview()
+  } catch (e) {
+    fixNotes.value = [String(e)]
+    toast(`撤销失败：${e}`, 'err')
+  } finally {
+    fixBusy.value = ''
+  }
+}
 </script>
 
 <template>
@@ -288,13 +355,53 @@ const warnCount = computed(() =>
         <div class="info-panel full-width">
           <div class="panel-header">
             <h4>环境健康诊断</h4>
+            <span class="panel-note" v-if="warnCount">{{ warnCount }} 项待处理</span>
+            <span class="panel-note ok" v-else>全部正常</span>
+            <div class="panel-head-right">
+              <button
+                v-if="fixState.canUndo"
+                class="btn ghost sm"
+                :disabled="!!fixBusy"
+                title="把用户 PATH 还原到上一次修复之前（修前已自动备份）"
+                @click="runUndo"
+              >
+                <Icon name="undo" :size="13" />
+                <span>{{ fixBusy === 'undo' ? '撤销中…' : '撤销上次修复' }}</span>
+              </button>
+            </div>
           </div>
           <div class="diag-grid">
-            <div class="diag-item" v-for="d in doctors" :key="d.name">
+            <div
+              class="diag-item"
+              v-for="d in doctors"
+              :key="d.name"
+              :class="{ 'is-fixable': canFix(d) }"
+            >
               <span class="lamp" :class="{ ok: d.status === 'ok', up: d.status === 'warn', err: d.status === 'bad', idle: d.status === 'info' }"></span>
               <span class="diag-name">{{ d.name }}</span>
-              <span class="diag-detail">{{ d.detail }}</span>
+              <span class="diag-detail" :title="d.detail">{{ d.detail }}</span>
+              <button
+                v-if="canFix(d)"
+                class="btn sm diag-fix"
+                :disabled="!!fixBusy"
+                title="由 EnvSwitch 自动处理这一项；写用户 PATH 前会先备份，可一键撤销"
+                @click="runFix(d.name)"
+              >
+                <Icon name="wrench" :size="12" />
+                <span>{{ fixBusy === d.name ? '处理中…' : '修复' }}</span>
+              </button>
+              <span v-else-if="d.status === 'warn' || d.status === 'bad'" class="diag-manual" title="这类异常要管理员权限或装运行库，EnvSwitch 不代做">需手动</span>
             </div>
+          </div>
+
+          <!-- 最近一次修复的逐条结论（含复检是否真的通过） -->
+          <div v-if="fixNotes.length" class="diag-result">
+            <div v-for="(n, i) in fixNotes" :key="i" class="diag-result-row" :class="{ bad: /失败|仍有|未解|跳过|手动/.test(n) }">
+              {{ n }}
+            </div>
+            <button class="diag-result-close" title="关闭" @click="fixNotes = []">
+              <Icon name="close" :size="12" />
+            </button>
           </div>
         </div>
       </div>
@@ -814,7 +921,7 @@ const warnCount = computed(() =>
 
 .panel-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   margin-bottom: 12px;
 }
@@ -823,6 +930,29 @@ const warnCount = computed(() =>
   font-size: 13px;
   font-weight: 600;
   color: var(--ink-1);
+}
+
+/* 诊断整体状态小结：有异常时用警示色，全绿时用主色弱背景 */
+.panel-note {
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--warn);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+}
+
+.panel-note.ok {
+  color: var(--accent-ink);
+  background: var(--accent-dim);
+  border-color: var(--accent-line);
+}
+
+.panel-head-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .diag-grid {
@@ -848,10 +978,96 @@ const warnCount = computed(() =>
 }
 
 .diag-detail {
+  flex: 1;
+  min-width: 0;
   color: var(--ink-2);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 可一键修复的异常项：整行给一点主色描边，按钮固定在行尾 */
+.diag-item.is-fixable {
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline-strong);
+}
+
+.diag-fix {
+  flex: none;
+  gap: 4px;
+  color: var(--accent-ink);
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-line);
+}
+
+.diag-fix:hover:not(:disabled) {
+  color: #FFFFFF;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.diag-fix:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.diag-fix:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+}
+
+/* 不可修但要紧的异常：明确标「需手动」，不让用户以为按下去就能好 */
+.diag-manual {
+  flex: none;
+  margin-left: auto;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--ink-3);
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+}
+
+/* 最近一次修复的结论（含复检是否真的通过） */
+.diag-result {
+  position: relative;
+  margin-top: 10px;
+  padding: 9px 30px 9px 11px;
+  border-radius: var(--r-ctl);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline-strong);
+}
+
+.diag-result-row {
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--ink-2);
+  word-break: break-all;
+}
+
+.diag-result-row + .diag-result-row {
+  margin-top: 3px;
+}
+
+.diag-result-row.bad {
+  color: var(--warn);
+}
+
+.diag-result-close {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--ink-3);
+}
+
+.diag-result-close:hover {
+  color: var(--ink-1);
+  background: var(--surface-soft);
 }
 </style>

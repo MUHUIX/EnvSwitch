@@ -151,9 +151,17 @@ type ProgressEvent struct {
 }
 
 type CheckView struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	Detail string `json:"detail"`
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Detail  string `json:"detail"`
+	Fixable bool   `json:"fixable"` // 支持一键修复（口径见 core.fixableChecks）
+}
+
+// FixState 是诊断修复的撤销能力快照：GUI 据此决定「撤销上次修复」按钮是否可用。
+type FixState struct {
+	CanUndo bool     `json:"canUndo"`
+	SavedAt string   `json:"savedAt"`
+	Actions []string `json:"actions"`
 }
 
 type SettingsView struct {
@@ -414,9 +422,44 @@ func (a *App) Doctor() []CheckView {
 	cs := core.Doctor(a.ads, a.s)
 	out := make([]CheckView, 0, len(cs))
 	for _, c := range cs {
-		out = append(out, CheckView(c))
+		// Fixable 用 FixableFor：不光看类别，还判此刻这台机器上修不修得了（系统段抢位不给按钮）
+		out = append(out, CheckView{Name: c.Name, Status: c.Status, Detail: c.Detail, Fixable: core.FixableFor(c.Name, a.ads, a.s)})
 	}
 	return out
+}
+
+// DoctorFix 一键修复体检项（name 为空 = 修所有可修且仍异常的项），返回逐项结论。
+// 与切换/安装共用 opsMu 读锁：版本库迁移期间不放行，避免半路改 PATH。
+func (a *App) DoctorFix(name string) ([]string, error) {
+	if a.storeMoving.Load() {
+		return nil, core.W(core.ErrUsage, "版本库正在迁移，完成后再修复")
+	}
+	if !a.opsMu.TryRLock() {
+		return nil, core.W(core.ErrUsage, "另一个版本库操作正在进行，请稍候再修复")
+	}
+	defer a.opsMu.RUnlock()
+	notes, err := core.DoctorFix(a.s, a.ads, name)
+	a.clearSysDetectCache()
+	a.emitStatus()
+	return notes, err
+}
+
+// DoctorUndo 撤销上一次对系统 PATH 做的修复（回到修复前的原值）。
+func (a *App) DoctorUndo() ([]string, error) {
+	if !a.opsMu.TryRLock() {
+		return nil, core.W(core.ErrUsage, "另一个版本库操作正在进行，请稍候再撤销")
+	}
+	defer a.opsMu.RUnlock()
+	notes, err := core.UndoDoctorFix(a.s)
+	a.clearSysDetectCache()
+	a.emitStatus()
+	return notes, err
+}
+
+// DoctorFixState 报告是否有可撤销的修复快照。
+func (a *App) DoctorFixState() FixState {
+	can, at, acts := core.DoctorFixState(a.s)
+	return FixState{CanUndo: can, SavedAt: at, Actions: acts}
 }
 
 func (a *App) Settings() SettingsView {

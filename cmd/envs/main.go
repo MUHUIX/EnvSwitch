@@ -470,16 +470,45 @@ func whichCmd() *cobra.Command {
 // —— doctor ——
 
 func doctorCmd() *cobra.Command {
-	var bundle bool
+	var bundle, fix, undo bool
 	c := &cobra.Command{
 		Use:   "doctor",
 		Short: "体检：PATH 优先级、激活链接、写权限、共存、WebView2",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			checks := core.Doctor(tools.All(), settings_)
 			w := tw()
+			// --undo：把上一次 --fix/GUI 修复写进的用户 PATH 还原（快照在 home\doctor-fix.json）
+			if undo {
+				notes, err := core.UndoDoctorFix(settings_)
+				for _, n := range notes {
+					fmt.Println(n)
+				}
+				if err != nil {
+					return err
+				}
+				fmt.Println()
+			}
+			// --fix：只修 doctor 里标了「可修复」的那几项（EnvSwitch 自有 PATH 条目 +
+			// 激活链接重指 + 托管变量校准），修前自动快照，随时 --undo 撤回。
+			if fix {
+				notes, err := core.DoctorFix(settings_, tools.All(), "")
+				for _, n := range notes {
+					fmt.Println(n)
+				}
+				if err != nil {
+					return err
+				}
+				fmt.Println()
+			}
+			checks := core.Doctor(tools.All(), settings_)
 			for _, ch := range checks {
 				mark := map[string]string{"ok": "✓", "warn": "!", "bad": "✗", "info": "·"}[ch.Status]
-				fmt.Fprintf(w, "%s\t%s\t%s\n", mark, ch.Name, ch.Detail)
+				hint := ""
+				if (ch.Status == "warn" || ch.Status == "bad") && core.FixableFor(ch.Name, tools.All(), settings_) {
+					hint = "（可修复：envs doctor --fix）"
+				} else if ch.Status == "warn" || ch.Status == "bad" {
+					hint = "（需手动：见说明）"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s%s\n", mark, ch.Name, ch.Detail, hint)
 			}
 			w.Flush()
 			if flagJSON {
@@ -501,6 +530,8 @@ func doctorCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&bundle, "bundle", false, "打包诊断信息（提交 issue 时附上）")
+	c.Flags().BoolVar(&fix, "fix", false, "一键修复可处理的异常（写 PATH 前自动快照）")
+	c.Flags().BoolVar(&undo, "undo", false, "撤销上一次 --fix 对用户 PATH 的改动")
 	return c
 }
 
